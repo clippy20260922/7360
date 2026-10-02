@@ -1,0 +1,8 @@
+[project]
+name = "myapp"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.142.1",
+    "sqlmodel>=0.0.47",
+]
