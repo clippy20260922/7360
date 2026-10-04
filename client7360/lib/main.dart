@@ -80,6 +80,54 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<void> _fetchValue() async {
+    final url = _serverUrlController.text.trim();
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _getValueController.text = (data['value'] ?? '').toString();
+        _getInfoController.text = 'response(success): ${response.statusCode}';
+      } else {
+        _getInfoController.text = 'response(error): ${response.statusCode}';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _getInfoController.text = 'error';
+    }
+  }
+
+  Future<void> _postValue() async {
+    final url = _serverUrlController.text.trim();
+    final value = _postValueController.text;
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'value': value}),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final postedValue = (data['value'] ?? '').toString();
+
+        _lastPostController.text = postedValue;
+        // _getValueController.text = postedValue;
+        _postInfoController.text = 'response(success): ${response.statusCode}';
+      } else {
+        _postInfoController.text = 'response(error): ${response.statusCode}';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _postInfoController.text = 'error';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
