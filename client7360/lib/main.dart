@@ -129,6 +129,16 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   @override
+  void dispose() {
+    _getValueController.dispose();
+    _lastPostController.dispose();
+    _postValueController.dispose();
+    _serverUrlController.dispose();
+    _postInfoController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
@@ -146,31 +156,134 @@ class _MyHomePageState extends State<MyHomePage> {
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+      body: SingleChildScrollView(
+        child: Center(
+          // Center is a layout widget. It takes a single child and positions it
+          // in the middle of the parent.
+          child: Column(
+            // Column is also a layout widget. It takes a list of children and
+            // arranges them vertically. By default, it sizes itself to fit its
+            // children horizontally, and tries to be as tall as its parent.
+            //
+            // Column has various properties to control how it sizes itself and
+            // how it positions its children. Here we use mainAxisAlignment to
+            // center the children vertically; the main axis here is the vertical
+            // axis because Columns are vertical (the cross axis would be
+            // horizontal).
+            //
+            // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
+            // action in the IDE, or press "p" in the console), to see the
+            // wireframe for each widget.
+            mainAxisAlignment: .center,
+            children: [
+              const Text('You have pushed the button this many times:'),
+              Text(
+                '$_counter',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 20),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _serverUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'server URL',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 48),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _getValueController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'GET value',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _lastPostController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'last POSTed value',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 48),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _postValueController,
+                  decoration: const InputDecoration(
+                    labelText: 'value for POST',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 48),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _getInfoController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'GET response info',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _postInfoController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'POST response info',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: _fetchValue,
+                    child: const Text('GET'),
+                  ),
+                  const SizedBox(width: 32),
+                  ElevatedButton(
+                    onPressed: _postValue,
+                    child: const Text('POST'),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
