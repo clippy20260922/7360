@@ -58,6 +58,17 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
 
+  final TextEditingController _getValueController = TextEditingController();
+  final TextEditingController _lastPostController = TextEditingController();
+  final TextEditingController _getInfoController = TextEditingController();
+  final TextEditingController _postInfoController = TextEditingController();
+  final TextEditingController _postValueController = TextEditingController(
+    text: 'bonjouj',
+  );
+  final TextEditingController _serverUrlController = TextEditingController(
+    text: 'http://127.0.0.1:8000/data',
+  );
+
   void _incrementCounter() {
     setState(() {
       // This call to setState tells the Flutter framework that something has
