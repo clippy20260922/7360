@@ -26,10 +26,10 @@ def init_slot_db() -> None:
     row = conn.execute("SELECT slot_id FROM slot_table WHERE id = 1").fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO slot_table (slot_lat, slot_long, slot_type, slot_pmr, slot_elec,parking_protege) " \
-            "VALUES (1.22, 2.33, 'voit', false, false, false) (1.22, 2.35, 'voit', false, false, false)"
-            "(1.23, 2.37, 'voit', false, true, true) (1.46, 2.12, 'voit', true, false, false)"
-            "(2.22, 0.66, 'voit', true, false, true) (1.25, 2.43, 'moto', false, false, false)"
+            "INSERT INTO slot_table (slot_lat, slot_long, slot_type, slot_pmr, slot_elec,parking_protege) "\
+            "VALUES (1.22, 2.33, 'voit', false, false, false) (1.22, 2.35, 'voit', false, false, false)"\
+            "(1.23, 2.37, 'voit', false, true, true) (1.46, 2.12, 'voit', true, false, false)"\
+            "(2.22, 0.66, 'voit', true, false, true) (1.25, 2.43, 'moto', false, false, false)"\
             "(1.28, 2.29, 'voit', false, false, true)"
         )
     conn.commit()
