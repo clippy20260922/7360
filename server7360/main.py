@@ -48,8 +48,8 @@ def init_vehicule_db() -> None:
     row = conn.execute("SELECT no_place FROM user_table").fetchone()
     if row is None:
         conn.execute (
-            "INSERT INTO user_table (no_plaque, type_vehicule, elec)"\
-            "VALUES ('AB123CD','voit', false)"
+            "INSERT INTO user_table (no_plaque, proprietaire, type_vehicule, elec)"\
+            "VALUES ('AB123CD', 'ab123456','voit', false)"
         )
     conn.commit()
     conn.close()
