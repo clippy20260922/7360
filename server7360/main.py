@@ -14,22 +14,22 @@ def init_slot_db() -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS slot_table ("\
-        " slot_id int AUTO_INCREMENT PRIMARY KEY, ("\
-        " slot_lat float NOT NULL,("\
-        " slot_long float NOT NULL,("\
-        " slot_type char[4] NOT NULL, ("\
-        " slot_occupied boolean DEFAULT false,("\
-        " slot_pmr boolean,("\
-        " slot_elec boolean,("\
+        " slot_id int AUTO_INCREMENT PRIMARY KEY,"\
+        " slot_lat float NOT NULL,"\
+        " slot_long float NOT NULL,"\
+        " slot_type char[4] NOT NULL, "\
+        " slot_occupied boolean DEFAULT false,"\
+        " slot_pmr boolean,"\
+        " slot_elec boolean,"\
         " parking_protege boolean)"
     )
-    row = conn.execute("SELECT slot_id FROM slot_table WHERE id = 1").fetchone()
+    row = conn.execute("SELECT slot_id FROM slot_table WHERE slot_id = 1").fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO slot_table (slot_lat, slot_long, slot_type, slot_pmr, slot_elec,parking_protege) " \
-            "VALUES (1.22, 2.33, 'voit', false, false, false) (1.22, 2.35, 'voit', false, false, false)"
-            "(1.23, 2.37, 'voit', false, true, true) (1.46, 2.12, 'voit', true, false, false)"
-            "(2.22, 0.66, 'voit', true, false, true) (1.25, 2.43, 'moto', false, false, false)"
+            "INSERT INTO slot_table (slot_lat, slot_long, slot_type, slot_pmr, slot_elec,parking_protege) "\
+            "VALUES (1.22, 2.33, 'voit', false, false, false), (1.22, 2.35, 'voit', false, false, false),"\
+            "(1.23, 2.37, 'voit', false, true, true), (1.46, 2.12, 'voit', true, false, false),"\
+            "(2.22, 0.66, 'voit', true, false, true), (1.25, 2.43, 'moto', false, false, false),"\
             "(1.28, 2.29, 'voit', false, false, true)"
         )
     conn.commit()
@@ -37,19 +37,19 @@ def init_slot_db() -> None:
 
 def init_vehicule_db() -> None:
     VEHICULE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(VEHICULE_DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS user_table ("\
-                " no_plaque char[9] PRIMARY KEY, ("\
+                " no_plaque char[9] PRIMARY KEY,"\
                 " proprietaire char[10] NOT NULL,"\
-                " type_vehicule float NOT NULL,("\
+                " type_vehicule float NOT NULL,"\
                 " elec boolean)"
     )
     row = conn.execute("SELECT no_place FROM user_table").fetchone()
     if row is None:
         conn.execute (
-            "INSERT INTO user_table (no_plaque, type_vehicule, elec)"\
-            "VALUES ('AB123CD','voit', false)"
+            "INSERT INTO user_table (no_plaque, proprietaire, type_vehicule, elec)"\
+            "VALUES ('AB123CD', 'ab123456','voit', false)"
         )
     conn.commit()
     conn.close()
