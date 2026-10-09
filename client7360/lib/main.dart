@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'parking_map_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -278,6 +279,14 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: const Text('POST'),
                   ),
                 ],
+              ),
+
+              ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ParkingMapPage()),
+                ),
+                icon: const Icon(Icons.local_parking),
+                label: const Text('Plan du parking'),
               ),
 
               const SizedBox(height: 16),
