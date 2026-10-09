@@ -73,7 +73,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const ExempleDePage(),
+                    builder: (context) => const ExempleDePage(
+                      un_exemple_de_variable: "paramètre de l'exemple de page"
+                    ),
                   ),
                 );
               },
