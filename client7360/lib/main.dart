@@ -80,6 +80,8 @@ class _MyHomePageState extends State<MyHomePage> {
               child: const Text('Open ExempleDePage'),
             ),
 
+            const SizedBox(height: 32),
+
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
