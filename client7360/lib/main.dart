@@ -59,22 +59,29 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
+
       appBar: AppBar(
         title: const Text('Home'),
       ),
+
       body: Center(
-        child: ElevatedButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const ServerTestingPage(),
-              ),
-            );
-          },
-          child: const Text('Open current UI'),
+        child: Column(
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ServerTestingPage(),
+                  ),
+                );
+              },
+              child: const Text('Open current UI'),
+            ),
+          ],
         ),
       ),
+      
     );
   }
 }
