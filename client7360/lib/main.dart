@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 // FICHIERS LOCAUX
 import 'server_ui.dart';
+import 'exemple_de_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -72,6 +73,18 @@ class _MyHomePageState extends State<MyHomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
+                    builder: (context) => const ExempleDePage(),
+                  ),
+                );
+              },
+              child: const Text('Open ExempleDePage'),
+            ),
+
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
                     builder: (context) => const ServerTestingPage(),
                   ),
                 );
@@ -81,7 +94,7 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
       ),
-      
+
     );
   }
 }
