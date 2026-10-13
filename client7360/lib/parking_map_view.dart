@@ -142,11 +142,6 @@ class ParkingPainter extends CustomPainter {
   final List<ParkingSpot> spots;
   final ParkingSpot? selected;
 
-  static const _carColors = [
-    Color(0xFF455A64), Color(0xFF1565C0), Color(0xFF6D4C41),
-    Color(0xFF8E24AA), Color(0xFFBDBDBD), Color(0xFF2E7D32),
-  ];
-
   @override
   void paint(Canvas canvas, Size size) {
     // Sol
@@ -190,13 +185,9 @@ class ParkingPainter extends CustomPainter {
       );
     }
 
-    // Objets extrudés (bâtiments + voitures), triés du plus loin au plus proche
+    // Bâtiments extrudés, triés du plus loin au plus proche
     final items = <_Box>[
       for (final b in buildings) _Box(b.footprint, b.height, b.color),
-      for (final s in spots)
-        if (s.status == SpotStatus.occupied)
-          _Box(rectCorners(s.center, s.width * 0.78, s.length * 0.8, s.angle), 1.5,
-              _carColors[s.id.hashCode.abs() % _carColors.length]),
     ]..sort((a, b) => cam.dist(b.centroid).compareTo(cam.dist(a.centroid)));
     for (final b in items) {
       _drawBox(canvas, b);
@@ -345,9 +336,7 @@ class _ParkingMapViewState extends State<ParkingMapView> {
     ParkingSpot? best;
     var bestDist = double.infinity;
     for (final s in widget.spots) {
-      final hit = cam.polygon(s.corners).contains(d.localPosition) ||
-          (s.status == SpotStatus.occupied &&
-              cam.polygon(s.corners, 1.5).contains(d.localPosition));
+      final hit = cam.polygon(s.corners).contains(d.localPosition);
       if (hit) {
         final dist = cam.dist(s.center);
         if (dist < bestDist) {
@@ -394,28 +383,25 @@ class _ParkingMapViewState extends State<ParkingMapView> {
           ),
         );
       }),
-      if (widget.showSelectionCard && sel != null)
+            if (widget.showSelectionCard && sel != null)
         Positioned(
           left: 12,
           right: 12,
           bottom: 12,
           child: SafeArea(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (widget.showSelectionCard && sel != null)
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.local_parking),
-                    title: Text('Place ${sel.id}'),
-                    subtitle: Text(_label(sel.status)),
-                    trailing: sel.status == SpotStatus.free
-                        ? FilledButton(
-                            onPressed: () => _reserve(sel),
-                            child: const Text('Réserver'),
-                          )
-                        : null,
-                  ),
-                ),
-            ]),
+            child: Card(
+              child: ListTile(
+                leading: const Icon(Icons.local_parking),
+                title: Text('Place ${sel.id}'),
+                subtitle: Text(_label(sel.status)),
+                trailing: sel.status == SpotStatus.free
+                    ? FilledButton(
+                        onPressed: () => _reserve(sel),
+                        child: const Text('Réserver'),
+                      )
+                    : null,
+              ),
+            ),
           ),
         ),
     ]);
