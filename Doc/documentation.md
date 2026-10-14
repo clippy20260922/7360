@@ -56,29 +56,29 @@ Tableau des utilisateurs enregistrés
 ## Les pages
 La structure du backend. Les pages en italiques n'ont pas de réponse visible et servent à traiter des données
 
-|   
+ |   
 +- token : login de l'utilisateur (TODO: faire ça proprement et coordonner avec le front-end)   
-|   
+ |   
 +- data : toutes les places   
-    |   
-    +- id_de_place : information sur la place id_de_place   
-        |   
-        +- *set_occupation* : modifie l'occupation (fonctionnement selon le type d'utilisateur)   
-    |   
-    +- free : toutes les places libres      
-        |   
-        +- voiture : toutes les places libres pour voiture   
-            |   
-            +- basic : les places libres pour voiture non-électriques et non-PMR   
-            |   
-            +- elec: les places libres pour voiture électrique   
-            |   
-            +- PMR : les places libres pour voiture PMR   
-        |   
-        +- moto : toutes les places libres pour moto   
-|   
+     |   
+    +- id_de_place : information sur la place id_de_place   
+         |   
+        +- *set_occupation* : modifie l'occupation (fonctionnement selon le type d'utilisateur)   
+     |   
+    +- free : toutes les places libres      
+         |   
+        +- voiture : toutes les places libres pour voiture   
+             |   
+            +- basic : les places libres pour voiture non-électriques et non-PMR   
+             |   
+            +- elec: les places libres pour voiture électrique   
+             |   
+            +- PMR : les places libres pour voiture PMR   
+         |   
+        +- moto : toutes les places libres pour moto   
+ |   
 +- user   
-    |   
-    +- id_utilisateur : information sur les véhicules de l'utilisateur (si l'utilisateur est enregistré)   
-        |   
-        +- plaque : information sur un véhicule (appartenant à l'utilisateur)   
+     |   
+    +- id_utilisateur : information sur les véhicules de l'utilisateur (si l'utilisateur est enregistré)   
+         |   
+        +- plaque : information sur un véhicule (appartenant à l'utilisateur)   
