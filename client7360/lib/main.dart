@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 // FICHIERS LOCAUX
 import 'server_ui.dart';
+import 'zone_page.dart';
 import 'exemple_de_page.dart';
 import 'paiement_page.dart';
 
@@ -69,6 +70,20 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         child: Column(
           children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ZonePage(),
+                  ),
+                );
+              },
+              child: const Text('Choisir une zone'),
+            ),
+
+            const SizedBox(height: 32),
+
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
