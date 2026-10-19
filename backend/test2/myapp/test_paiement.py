@@ -2,22 +2,9 @@
 # Lancer : uv run --with pytest pytest test_paiement.py
 
 import pytest
-from fastapi.testclient import TestClient
-
 import main
 
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    #bases dans un dossier temporaire pour ne pas toucher /data
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "la-base.db")
-    monkeypatch.setattr(main, "VEHICULE_DB_PATH", tmp_path / "l-autre-database.db")
-    monkeypatch.setattr(main, "USER_DB_PATH", tmp_path / "database-user.db")
-    monkeypatch.setattr(main, "PAIEMENT_DB_PATH", tmp_path / "database-paiement.db")
-    #personne n'est connecté au début de chaque test
-    monkeypatch.setattr(main, "current_user", main.User())
-    with TestClient(main.app) as c:
-        yield c
+#la fixture "client" est dans conftest.py
 
 
 def login(client, username="ab123456", password="Mon_mdp123"):
