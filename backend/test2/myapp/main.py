@@ -217,9 +217,41 @@ def get_moto_free() -> dict :
     conn = sqlite3.connect(DB_PATH)
     data = conn.execute("SELECT * FROM slot_table WHERE slot_occupied=false and slot_type='moto'").fetchall()
     conn.close()
-    if len(data)==0 : 
+    if len(data)==0 :
         return {"Aucune place libre"}
     return {"N":len(data), "data":data}
+
+
+########## Places d'une zone géographique ##########
+
+# La zone est un rectangle sur la carte : entre deux latitudes et deux longitudes
+Latitude = Annotated[float, Query(ge=-90, le=90)]
+Longitude = Annotated[float, Query(ge=-180, le=180)]
+
+def places_dans_zone(lat_min:float, lat_max:float, long_min:float, long_max:float, libres:bool) -> dict:
+    if lat_min > lat_max or long_min > long_max:
+        raise HTTPException(status_code=400, detail="Zone invalide : le min doit être inférieur au max")
+    requete = "SELECT * FROM slot_table WHERE slot_lat BETWEEN ? AND ? AND slot_long BETWEEN ? AND ?"
+    if libres:
+        requete += " AND slot_occupied=false"
+    conn = sqlite3.connect(DB_PATH)
+    data = conn.execute(requete, (lat_min,lat_max,long_min,long_max,)).fetchall()
+    conn.close()
+    if len(data)==0 :
+        return {"N":0}
+    return {"N":len(data), "data":data}
+
+### Toutes les places d'une zone
+
+@app.get("/data/zone")
+def get_zone(lat_min:Latitude, lat_max:Latitude, long_min:Longitude, long_max:Longitude) -> dict:
+    return places_dans_zone(lat_min, lat_max, long_min, long_max, libres=False)
+
+### Places libres d'une zone
+
+@app.get("/data/free/zone")
+def get_free_zone(lat_min:Latitude, lat_max:Latitude, long_min:Longitude, long_max:Longitude) -> dict:
+    return places_dans_zone(lat_min, lat_max, long_min, long_max, libres=True)
 
 
 ########## Modification des places ##########
