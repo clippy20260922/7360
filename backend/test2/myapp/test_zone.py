@@ -2,19 +2,8 @@
 # Lancer : uv run --with pytest pytest test_zone.py
 
 import pytest
-from fastapi.testclient import TestClient
 
-import main
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    #bases dans un dossier temporaire pour ne pas toucher /data
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "la-base.db")
-    monkeypatch.setattr(main, "VEHICULE_DB_PATH", tmp_path / "l-autre-database.db")
-    monkeypatch.setattr(main, "USER_DB_PATH", tmp_path / "database-user.db")
-    with TestClient(main.app) as c:
-        yield c
+#la fixture "client" est dans conftest.py
 
 
 def ids(reponse):
