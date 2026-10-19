@@ -76,6 +76,10 @@ La structure du backend. Les pages en italiques n'ont pas de réponse visible et
             +- PMR : les places libres pour voiture PMR   
          |   
         +- moto : toutes les places libres pour moto   
+         |   
+        +- zone : les places libres d'une zone (paramètres lat_min, lat_max, long_min, long_max)   
+     |   
+    +- zone : toutes les places d'une zone, un rectangle sur la carte (paramètres lat_min, lat_max, long_min, long_max)   
  |   
 +- user   
      |   
