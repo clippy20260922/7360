@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 // FICHIERS LOCAUX
 import 'server_ui.dart';
 import 'exemple_de_page.dart';
+import 'paiement_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -94,6 +95,21 @@ class _MyHomePageState extends State<MyHomePage> {
                 );
               },
               child: const Text('Open current UI'),
+            ),
+
+            const SizedBox(height: 32),
+
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    // TODO : ouvrir depuis la carte ou la liste des places au lieu de la place 1
+                    builder: (context) => const PaiementPage(idPlace: 1),
+                  ),
+                );
+              },
+              child: const Text('Payer une place'),
             ),
           ],
         ),
