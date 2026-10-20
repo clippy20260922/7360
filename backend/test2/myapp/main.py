@@ -12,11 +12,14 @@ USER_DB_PATH = Path("/data/database-user.db")
 app = FastAPI(title="Simple SQLite API")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+#TODO: get time
+fake_time = "2026-23-10 09:00:00"
+
 ########## Classes et database ##########
 
 class User():
     username : str
-    type : str = "user" #user ou agent ou None
+    type : str = "user" #user ou agent ou None -> remplacer par token?
     vehicule : list | None
     def __init__(self):
         self.username = ""
@@ -62,6 +65,7 @@ def init_vehicule_db() -> None:
                 " no_plaque char[9] PRIMARY KEY,"\
                 " proprietaire char[30] NOT NULL,"\
                 " type_vehicule float NOT NULL,"\
+                " current_slot int DEFAULT NULL,"
                 " elec boolean)"
     )
     row = conn.execute("SELECT * FROM vehicle_table").fetchone()
@@ -132,7 +136,7 @@ def get_data(id) -> None :
     if data is None : 
         return {"Pas de place avec cet identifiant : ", id}
         #return {"N":0}
-    return {"Place": id, "lat":data[1], "long":data[2], "type de place":data[3], "occupé":data[4], "PMR":data[5], "Borne électrique":data[6], "parking protégé":data[7]}
+    return {"Place": id, "lat":data[1], "long":data[2], "type de place":data[3], "occupé":data[4], "PMR":data[5], "Borne électrique":data[6], "parking protégé":data[7], "date de fin":data[8]}
     #return {"N":1,"place":data}
 
 ### Places libres
@@ -158,6 +162,7 @@ def get_voit_free() -> dict :
     return {"N":len(data), "data":data}
 
 ### Places pour voiture libres sans les places pmr ou borne électrique
+#TODO: elec, pmr en input 
 
 @app.get("/data/free/voiture/basic")
 def get_voit_free() -> dict : 
@@ -204,6 +209,7 @@ def get_moto_free() -> dict :
 
 ########## Modification des places ##########
 
+
 def valid_timestamp(timestamp:str):
     #verif du format du string en tant que timestamp
     valid = len(timestamp)==19
@@ -221,20 +227,21 @@ def valid_timestamp(timestamp:str):
     return valid
 
 ### Modification de l'occupation
+# TODO: correspondance avec le véhicule
 @app.patch("/data/{id:int}/set_occupation")
-async def set_slot_occupied(id:int, set_bool : bool, endtime : str = "1900-01-01 00:00:00" ) -> dict :
-    if not valid_timestamp(endtime):
-        raise HTTPException(status_code=400,detail="Timestamp invalide")
+async def set_slot_occupied(id:int, set_bool : bool, occupation_time : int = -1 ) -> dict :
+    if set_bool and occupation_time<=0:
+        raise HTTPException(status_code=400,detail="Temps d'occupation invalide")
     conn = sqlite3.connect(DB_PATH)
     #Cas utilisateur (arrive ou part)
     if current_user.type == "user":
         if set_bool:
-            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
+            conn.execute ("UPDATE slot_table SET slot_occupied=?, fin_occupation= DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool, "+"+str(occupation_time)+" minutes",id,))
         else:
-            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation=? WHERE slot_id = ?;", (set_bool,endtime,id,))
+            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
     #cas agent (place mal renseignée)
     elif current_user.type == "agent":
-        if endtime!="1900-01-01 00:00:00":
+        if end_time!="1900-01-01 00:00:00":
             conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation=? WHERE slot_id = ?;", (set_bool,endtime,id,))
         else :
             conn.execute ("UPDATE slot_table SET slot_occupied=? WHERE slot_id = ?;", (set_bool,id,))
@@ -269,7 +276,24 @@ def get_vehicule_data(user_id, plaque_id) -> dict:
     conn.close()
     if len(data)==0 : 
         return {"N":0}
-    return {"N":1,"data":data}
+    return {"N":len(data),"data":data}
+
+
+########## Infos agents ##########
+
+
+#véhicule ayant dépassé le temps mais n'ayant pas indiqué être parti (parking peut être None)
+@app.get("/data/see_overtime")
+def get_overtime_slot(parking) -> dict:
+    if current_user.type == "agent":
+        current_time = fake_time #TODO
+        conn = sqlite3.connect(VEHICULE_DB_PATH)
+        data = conn.execute("SELECT slot_id FROM slot_table WHERE parking = ? and slot_occupied = true and fin_occupation < ?", parking, current_time).fetchall()
+        conn.close()
+        if len(data)==0:
+            return {"N":0}
+        return {"N":len(data), "data":data}
+
 
 
 ########## Login ##########
