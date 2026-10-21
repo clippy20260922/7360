@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Annotated
 
 DB_PATH = Path("/data/la-base.db")
-#VEHICULE_DB_PATH = Path("/data/l-autre-database.db")
 USER_DB_PATH = Path("/data/database-user.db")
 
 app = FastAPI(title="Simple SQLite API")
@@ -17,6 +16,7 @@ fake_time = "2026-23-10 09:00:00"
 
 ########## Classes et database ##########
 
+#Utilisateur et ses véhicules
 class User():
     username : str
     type : str = "user" #user ou agent ou None -> remplacer par token?
@@ -27,6 +27,9 @@ class User():
         self.vehicule = None
 current_user = User()
 
+
+### Fonction d'initilisation de la table des places de parking dans la database principale
+ 
 def init_slot_db(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -40,7 +43,7 @@ def init_slot_db(DB_PATH: Path) -> None:
         " slot_occupied boolean DEFAULT false,"\
         " slot_pmr boolean,"\
         " slot_elec boolean,"\
-        " parking char[20],"\
+        " parking char[20] DEFAULT NULL,"\
         " parking_protege boolean,"\
         " fin_occupation timestamp NOT NULL DEFAULT '1900-01-01 00:00:00')"
     )
@@ -53,8 +56,14 @@ def init_slot_db(DB_PATH: Path) -> None:
             "(5, 2.22, 0.66, 'voit', true, false, true), (6, 1.25, 2.43, 'moto', false, false, false),"\
             "(7, 1.28, 2.29, 'voit', false, false, true)"
         )
+        conn.execute(
+            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, parking, fin_occupation) "\
+            "VALUES (8, 2.00, 2.30, 'voit', false, false, false, 'Le Parking', '1900-01-01 00:00:00'), (9, 2.00, 2.3, 'voit', true, false, false, 'Le Parking', '2026-10-20 00:00:00')"
+        )
     conn.commit()
     conn.close()
+
+### Fonction d'initilisation de la table des véhicules dans la database principale
 
 def init_vehicule_db(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -77,8 +86,10 @@ def init_vehicule_db(DB_PATH: Path) -> None:
     conn.commit()
     conn.close()
 
+### Fonction d'initilisation de la table des utilisateurs dans la database des utilisateurs
+
 def init_user_db(DB_PATH: Path) -> None:
-    USER_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(USER_DB_PATH)
     conn.execute("DROP TABLE IF EXISTS user_table")
     conn.execute(
@@ -124,20 +135,6 @@ def data_sql() -> dict:
         return {"N":len(data)}
     else :
         return {"N":len(data), "data":data}
-    
-
-### Info d'une place
-    
-@app.get("/data/{id:int}")
-def get_data(id) -> None : 
-    conn = sqlite3.connect(DB_PATH)
-    data = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
-    conn.close()
-    if data is None : 
-        return {"Pas de place avec cet identifiant : ", id}
-        #return {"N":0}
-    return {"Place": id, "lat":data[1], "long":data[2], "type de place":data[3], "occupé":data[4], "PMR":data[5], "Borne électrique":data[6], "parking protégé":data[7], "date de fin":data[8]}
-    #return {"N":1,"place":data}
 
 ### Places libres
 
@@ -161,8 +158,7 @@ def get_voit_free() -> dict :
         return {"Aucune place libre"}
     return {"N":len(data), "data":data}
 
-### Places pour voiture libres sans les places pmr ou borne électrique
-#TODO: elec, pmr en input 
+### Places libres pour les voitures ni électriques ni PMR
 
 @app.get("/data/free/voiture/basic")
 def get_voit_free() -> dict : 
@@ -206,50 +202,70 @@ def get_moto_free() -> dict :
         return {"Aucune place libre"}
     return {"N":len(data), "data":data}
 
+### Info d'une place
+    
+@app.get("/data/{id:int}")
+def get_data(id) -> None : 
+    conn = sqlite3.connect(DB_PATH)
+    data = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
+    print(data)
+    conn.close()
+    if data is None : 
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant : "+str(id))
+    return {"Place": id, "lat":data[1], "long":data[2], "type de place":data[3], "occupé":data[4], "PMR":data[5], "Borne électrique":data[6], "parking protégé":data[7], "date de fin":data[8]}
+
 
 ########## Modification des places ##########
 
-
-def valid_timestamp(timestamp:str):
-    #verif du format du string en tant que timestamp
-    valid = len(timestamp)==19
-    valid = valid and int(timestamp[0:4])>2000
-    valid = valid and timestamp[4]=='-'
-    valid = valid and int(timestamp[5:7])>0 and int(timestamp[5:7])<13
-    valid = valid and timestamp[7]=='-'
-    valid = valid and int(timestamp[8:10])>0 and int(timestamp[8:10])<32
-    valid = valid and timestamp[10]==' '
-    valid = valid and int(timestamp[12:13])>=0 and int(timestamp[12:13])<13
-    valid = valid and timestamp[13]==':'
-    valid = valid and int(timestamp[14:16])>=0 and int(timestamp[14:16])<61
-    valid = valid and timestamp[16]==':'
-    valid = valid and int(timestamp[17:])>=0 and int(timestamp[17:])<61
-    return valid
-
 ### Modification de l'occupation
-# TODO: correspondance avec le véhicule
+
 @app.patch("/data/{id:int}/set_occupation")
 async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int = -1, vehicule : str = "" ) -> dict :
-    if set_bool and occupation_time_min<=0:
-        raise HTTPException(status_code=400,detail="Temps d'occupation invalide")
+    #Vérifie l'authentification
+    if current_user.username=="":
+        raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
+    
     conn = sqlite3.connect(DB_PATH)
     #Cas utilisateur (arrive ou part)
     if current_user.type == "user":
+        #Prendre la place
         if set_bool:
+
+            #Vérifier la présence des informations
             if vehicule=="":
                 raise HTTPException(status_code=400,detail="Veuillez renseigner la plaque du véhicule garé")
+            elif occupation_time_min<=0:
+                raise HTTPException(status_code=400,detail="Veuillez renseigner le temps d'occupation payé")
+            
             else:
+                #Vérifier l'appartenance du véhicule
+                data = conn.execute("SELECT proprietaire FROM vehicle_table WHERE no_plaque=?",(vehicule,)).fetchall()
+                if (len(data)!=0 and  current_user.username not in data[0]) or len(data)==0:
+                    raise HTTPException(status_code=400,detail="Veuillez enregistrer votre véhicule avant de le garer")
+                
+                #Vérifier que la place n'est pas prise
+                data = conn.execute("SELECT slot_occupied FROM slot_table WHERE slot_id=?",(id,)).fetchone()
+                if data==1:
+                    raise HTTPException(status_code=400,detail="Cette place est occupée. Si ce n'est pas le cas, veuillez contacter le support")
+
+                #Enregistrer les informations de la place et du véhicule
                 conn.execute("UPDATE slot_table SET slot_occupied=?, fin_occupation= DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool, "+"+str(occupation_time_min)+" minutes",id,))
-                conn.execute("UPDATE vehicle_table SET current_slot=?", (id,))
+                conn.execute("UPDATE vehicle_table SET current_slot=? WHERE no_plaque=?", (id,vehicule,))
+
+        #Libérer la place
         else:
-            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
-            conn.execute("UPDATE vehicle_table SET current_slot=NULL")
-    #cas agent (place mal renseignée)
+            conn.execute("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
+            conn.execute("UPDATE vehicle_table SET current_slot=NULL WHERE no_plaque=?", (vehicule,))
+        
+    #Cas agent (place mal renseignée)
     elif current_user.type == "agent":
-        if occupation_time_min!=-1:
-            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation=DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool,"+"+str(occupation_time_min)+" minutes",id,))
-        else :
-            conn.execute ("UPDATE slot_table SET slot_occupied=? WHERE slot_id = ?;", (set_bool,id,))
+        #Signaler une place prise ou libre non-rensignée
+        if set_bool and occupation_time_min!=-1:
+                conn.execute("UPDATE slot_table SET slot_occupied=? AND fin_occupation=DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool,"+"+str(occupation_time_min)+" minutes",id,))
+        else:
+                conn.execute("UPDATE slot_table SET slot_occupied=? WHERE slot_id = ?;", (set_bool,id,))
+
+    #Enregistrement des modifications
     conn.commit()
     data = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
     conn.close()
@@ -260,16 +276,20 @@ async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int =
 
 
 ### Info des véhicule d'un utilisateur
-# TODO restreindre à l'utilisateur actif
-@app.get("/user/{user_id:str}")
+
+@app.get("/user/{user_id}")
 def get_vehicule_data(user_id, plaque_id="") -> dict:
+    #Vérifie l'authentification
+    if current_user.username=="":
+            raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
+    
     if current_user.username != user_id:
         raise HTTPException(status_code=403, detail="Accès non-autorisé")
     conn = sqlite3.connect(DB_PATH)
     if plaque_id=="":
         data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ?", (user_id,)).fetchall()
     else :
-         data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ? AND no_plaque = ?", (user_id,plaque_id,)).fetchall()
+        data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ? AND no_plaque = ?", (user_id,plaque_id,)).fetchall()
     conn.close()
     if len(data)==0 : 
         return {"N":0}
@@ -279,17 +299,19 @@ def get_vehicule_data(user_id, plaque_id="") -> dict:
 
 @app.get("/user/{user_id}/en_cours")
 def get_current_parked_vehicule(user_id) -> dict:
-    print(user_id, current_user)
-    if user_id == current_user.username:
+    #Vérifie l'authentification
+    if current_user.username=="":
+            raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
+        
+    if user_id!=current_user.username:
+        raise HTTPException(status_code=403, detail="Accès non-autorisé")
+    else:
         conn = sqlite3.connect(DB_PATH)
         data = conn.execute("SELECT no_plaque,fin_occupation FROM slot_table LEFT JOIN vehicle_table ON slot_table.slot_id=vehicle_table.current_slot WHERE proprietaire=?",(user_id,)).fetchall()
         conn.close()
         print(data)
         return {"N":len(data), "data":data}
-    else :
-        raise HTTPException(status_code=403, detail="Accès non-autorisé")
-        return {"N":0}
-
+        
 
 ########## Infos agents ##########
 
@@ -297,15 +319,22 @@ def get_current_parked_vehicule(user_id) -> dict:
 #véhicule ayant dépassé le temps mais n'ayant pas indiqué être parti (parking peut être None)
 @app.get("/data/see_overtime")
 def get_overtime_slot(parking) -> dict:
+    #Vérifie l'authentification
+    if current_user.username=="":
+                raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
+
+    #Vérifier que l'utilisateur est un agent
+    # TODO: restreindre l'accès à certaines villes/parking?
     if current_user.type == "agent":
-        current_time = fake_time #TODO
         conn = sqlite3.connect(DB_PATH)
-        data = conn.execute("SELECT slot_id FROM slot_table WHERE parking = ? and slot_occupied = true and fin_occupation < ?", parking, current_time).fetchall()
+        data = conn.execute("SELECT slot_id FROM slot_table WHERE parking = ?", (parking,)).fetchone()
+        if data is None:
+            raise HTTPException(status_code=404, detail="Pas de parking à ce nom")
+        data = conn.execute("SELECT slot_id FROM slot_table WHERE parking = ? AND slot_occupied = true AND fin_occupation < CURRENT_TIMESTAMP", (parking,)).fetchall()
         conn.close()
         if len(data)==0:
             return {"N":0}
         return {"N":len(data), "data":data}
-
 
 
 ########## Login ##########
