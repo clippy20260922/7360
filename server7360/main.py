@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi import HTTPException, Query
+from typing import Annotated
 from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
@@ -14,7 +16,7 @@ def init_slot_db() -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS slot_table ("\
-        " slot_id int AUTO_INCREMENT PRIMARY KEY,"\
+        " slot_id INTEGER PRIMARY KEY,"\
         " slot_lat float NOT NULL,"\
         " slot_long float NOT NULL,"\
         " slot_type char[4] NOT NULL, "\
@@ -45,7 +47,7 @@ def init_vehicule_db() -> None:
                 " type_vehicule float NOT NULL,"\
                 " elec boolean)"
     )
-    row = conn.execute("SELECT no_place FROM user_table").fetchone()
+    row = conn.execute("SELECT no_plaque FROM user_table").fetchone()
     if row is None:
         conn.execute (
             "INSERT INTO user_table (no_plaque, proprietaire, type_vehicule, elec)"\
@@ -66,6 +68,37 @@ def startup_event() -> None:
 @app.get("/")
 def root() -> dict:
     return {"message": "Simple SQLite API is running"}
+
+########## Places d'une zone géographique ##########
+# Déclarées avant /data/{id} pour que "zone" ne soit pas pris pour un identifiant de place
+# La zone est un rectangle sur la carte : entre deux latitudes et deux longitudes
+Latitude = Annotated[float, Query(ge=-90, le=90)]
+Longitude = Annotated[float, Query(ge=-180, le=180)]
+
+def places_dans_zone(lat_min:float, lat_max:float, long_min:float, long_max:float, libres:bool) -> dict:
+    if lat_min > lat_max or long_min > long_max:
+        raise HTTPException(status_code=400, detail="Zone invalide : le min doit être inférieur au max")
+    requete = "SELECT * FROM slot_table WHERE slot_lat BETWEEN ? AND ? AND slot_long BETWEEN ? AND ?"
+    if libres:
+        requete += " AND slot_occupied=false"
+    conn = sqlite3.connect(DB_PATH)
+    data = conn.execute(requete, (lat_min,lat_max,long_min,long_max,)).fetchall()
+    conn.close()
+    if len(data)==0 :
+        return {"N":0}
+    return {"N":len(data), "data":data}
+
+### Toutes les places d'une zone
+
+@app.get("/data/zone")
+def get_zone(lat_min:Latitude, lat_max:Latitude, long_min:Longitude, long_max:Longitude) -> dict:
+    return places_dans_zone(lat_min, lat_max, long_min, long_max, libres=False)
+
+### Places libres d'une zone
+
+@app.get("/data/free/zone")
+def get_free_zone(lat_min:Latitude, lat_max:Latitude, long_min:Longitude, long_max:Longitude) -> dict:
+    return places_dans_zone(lat_min, lat_max, long_min, long_max, libres=True)
 
 ### Info d'une place
     
