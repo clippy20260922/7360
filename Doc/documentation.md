@@ -53,21 +53,6 @@ Tableau des utilisateurs enregistrés
 | password | char[100] | Mot de passe haché de l'utilisateur | Oui | |
 | type | char[5] | Type d'utilisateur : "user" ou "agent" | Oui | Détermine les permissions|
 
-#### paiement_table
-Tableau des paiements de places (paiement simulé, pas de vraie banque)
-
-| Colonne | Type | Définition | Obligatoire | Caractéristiques |
-|-----|------|-----|-----|-----|
-| paiement_id | integer | Identifiant du paiement | Oui | Clé primaire, auto-incrémentation |
-| username | char[30] | Utilisateur qui a payé | Oui | |
-| slot_id | int | Place payée | Oui | |
-| no_plaque | char[9] | Véhicule garé sur la place | Oui | Doit appartenir à l'utilisateur |
-| montant | float | Prix payé en euros | Oui | |
-| date_paiement | timestamp | Heure du paiement | Oui | Forme du time stamp : yyyy-mm-dd hh:mm:ss |
-| fin_occupation | timestamp | Fin de la durée payée | Oui | Recopiée dans slot_table.fin_occupation |
-
-Tarifs (variable `TARIF_HORAIRE` dans main.py) : voiture 2 €/h, moto 1 €/h, camion 4 €/h, au prorata des minutes. Durée maximale : 24 h.
-
 ## Les pages
 La structure du backend. Les pages en italiques n'ont pas de réponse visible et servent à traiter des données
 
@@ -79,10 +64,6 @@ La structure du backend. Les pages en italiques n'ont pas de réponse visible et
     +- id_de_place : information sur la place id_de_place   
          |   
         +- *set_occupation* : modifie l'occupation (fonctionnement selon le type d'utilisateur)   
-         |   
-        +- prix : prix de la place pour une durée (paramètre duree en minutes)   
-         |   
-        +- *payer* : paye la place et la passe occupée jusqu'à la fin de la durée (paramètres plaque et duree, connexion nécessaire)   
      |   
     +- free : toutes les places libres      
          |   
@@ -95,10 +76,6 @@ La structure du backend. Les pages en italiques n'ont pas de réponse visible et
             +- PMR : les places libres pour voiture PMR   
          |   
         +- moto : toutes les places libres pour moto   
-         |   
-        +- zone : les places libres d'une zone (paramètres lat_min, lat_max, long_min, long_max)   
-     |   
-    +- zone : toutes les places d'une zone, un rectangle sur la carte (paramètres lat_min, lat_max, long_min, long_max)   
  |   
 +- user   
      |   
