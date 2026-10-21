@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 DB_PATH = Path("/data/la-base.db")
-VEHICULE_DB_PATH = Path("/data/l-autre-database.db")
+#VEHICULE_DB_PATH = Path("/data/l-autre-database.db")
 USER_DB_PATH = Path("/data/database-user.db")
 
 app = FastAPI(title="Simple SQLite API")
@@ -27,7 +27,7 @@ class User():
         self.vehicule = None
 current_user = User()
 
-def init_slot_db() -> None:
+def init_slot_db(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS slot_table")
@@ -56,9 +56,9 @@ def init_slot_db() -> None:
     conn.commit()
     conn.close()
 
-def init_vehicule_db() -> None:
-    VEHICULE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(VEHICULE_DB_PATH)
+def init_vehicule_db(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS vehicle_table")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS vehicle_table ("\
@@ -77,7 +77,7 @@ def init_vehicule_db() -> None:
     conn.commit()
     conn.close()
 
-def init_user_db() -> None:
+def init_user_db(DB_PATH: Path) -> None:
     USER_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(USER_DB_PATH)
     conn.execute("DROP TABLE IF EXISTS user_table")
@@ -101,9 +101,9 @@ def init_user_db() -> None:
 
 @app.on_event("startup")
 def startup_event() -> None:
-    init_slot_db()
-    init_vehicule_db()
-    init_user_db()
+    init_slot_db(DB_PATH)
+    init_vehicule_db(DB_PATH)
+    init_user_db(USER_DB_PATH)
 
 @app.get("/")
 def root() -> dict:
@@ -229,20 +229,25 @@ def valid_timestamp(timestamp:str):
 ### Modification de l'occupation
 # TODO: correspondance avec le véhicule
 @app.patch("/data/{id:int}/set_occupation")
-async def set_slot_occupied(id:int, set_bool : bool, occupation_time : int = -1 ) -> dict :
-    if set_bool and occupation_time<=0:
+async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int = -1, vehicule : str = "" ) -> dict :
+    if set_bool and occupation_time_min<=0:
         raise HTTPException(status_code=400,detail="Temps d'occupation invalide")
     conn = sqlite3.connect(DB_PATH)
     #Cas utilisateur (arrive ou part)
     if current_user.type == "user":
         if set_bool:
-            conn.execute ("UPDATE slot_table SET slot_occupied=?, fin_occupation= DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool, "+"+str(occupation_time)+" minutes",id,))
+            if vehicule=="":
+                raise HTTPException(status_code=400,detail="Veuillez renseigner la plaque du véhicule garé")
+            else:
+                conn.execute("UPDATE slot_table SET slot_occupied=?, fin_occupation= DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool, "+"+str(occupation_time_min)+" minutes",id,))
+                conn.execute("UPDATE vehicle_table SET current_slot=?", (id,))
         else:
             conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
+            conn.execute("UPDATE vehicle_table SET current_slot=NULL")
     #cas agent (place mal renseignée)
     elif current_user.type == "agent":
-        if end_time!="1900-01-01 00:00:00":
-            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation=? WHERE slot_id = ?;", (set_bool,endtime,id,))
+        if occupation_time_min!=-1:
+            conn.execute ("UPDATE slot_table SET slot_occupied=? AND fin_occupation=DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool,"+"+str(occupation_time_min)+" minutes",id,))
         else :
             conn.execute ("UPDATE slot_table SET slot_occupied=? WHERE slot_id = ?;", (set_bool,id,))
     conn.commit()
@@ -256,27 +261,34 @@ async def set_slot_occupied(id:int, set_bool : bool, occupation_time : int = -1 
 
 ### Info des véhicule d'un utilisateur
 # TODO restreindre à l'utilisateur actif
-@app.get("/user/{user_id}")
-def get_vehicule_data(user_id) -> dict:
+@app.get("/user/{user_id:str}")
+def get_vehicule_data(user_id, plaque_id="") -> dict:
     if current_user.username != user_id:
         raise HTTPException(status_code=403, detail="Accès non-autorisé")
-    conn = sqlite3.connect(VEHICULE_DB_PATH)
-    data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ?", (user_id,)).fetchall()
+    conn = sqlite3.connect(DB_PATH)
+    if plaque_id=="":
+        data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ?", (user_id,)).fetchall()
+    else :
+         data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ? AND no_plaque = ?", (user_id,plaque_id,)).fetchall()
     conn.close()
     if len(data)==0 : 
         return {"N":0}
     return {"N":len(data), "data":data}
 
-### Info d'un véhicule d'un utilisateur
+### Infos des places en cours ###
 
-@app.get("/user/{user_id}/{plaque_id}")
-def get_vehicule_data(user_id, plaque_id) -> dict:
-    conn = sqlite3.connect(VEHICULE_DB_PATH)
-    data = conn.execute("SELECT * FROM vehicle_table WHERE proprietaire = ? AND no_plaque = ?", (user_id,plaque_id,)).fetchall()
-    conn.close()
-    if len(data)==0 : 
+@app.get("/user/{user_id}/en_cours")
+def get_current_parked_vehicule(user_id) -> dict:
+    print(user_id, current_user)
+    if user_id == current_user.username:
+        conn = sqlite3.connect(DB_PATH)
+        data = conn.execute("SELECT no_plaque,fin_occupation FROM slot_table LEFT JOIN vehicle_table ON slot_table.slot_id=vehicle_table.current_slot WHERE proprietaire=?",(user_id,)).fetchall()
+        conn.close()
+        print(data)
+        return {"N":len(data), "data":data}
+    else :
+        raise HTTPException(status_code=403, detail="Accès non-autorisé")
         return {"N":0}
-    return {"N":len(data),"data":data}
 
 
 ########## Infos agents ##########
@@ -287,7 +299,7 @@ def get_vehicule_data(user_id, plaque_id) -> dict:
 def get_overtime_slot(parking) -> dict:
     if current_user.type == "agent":
         current_time = fake_time #TODO
-        conn = sqlite3.connect(VEHICULE_DB_PATH)
+        conn = sqlite3.connect(DB_PATH)
         data = conn.execute("SELECT slot_id FROM slot_table WHERE parking = ? and slot_occupied = true and fin_occupation < ?", parking, current_time).fetchall()
         conn.close()
         if len(data)==0:
