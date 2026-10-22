@@ -7,6 +7,12 @@ class EcranDAccueil extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final buttonStyle = FilledButton.styleFrom(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+    );
+
     return Scaffold(
       appBar: AppBar(title: const Text('Bonjour !')),
       body: Padding(
@@ -31,6 +37,7 @@ class EcranDAccueil extends StatelessWidget {
                       SizedBox.square(
                         dimension: buttonSize,
                         child: FilledButton(
+                          style: buttonStyle,
                           onPressed: () {},
                           child: const Text('Bouton 1'),
                         ),
@@ -38,6 +45,7 @@ class EcranDAccueil extends StatelessWidget {
                       SizedBox.square(
                         dimension: buttonSize,
                         child: FilledButton(
+                          style: buttonStyle,
                           onPressed: () {},
                           child: const Text('Bouton 2'),
                         ),
@@ -51,6 +59,7 @@ class EcranDAccueil extends StatelessWidget {
               width: double.infinity,
               height: 48,
               child: FilledButton(
+                style: buttonStyle,
                 onPressed: () {},
                 child: const Text('Bouton du bas'),
               ),
