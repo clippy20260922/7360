@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 // FICHIERS LOCAUX
-//import 'server_ui.dart';
-//import 'zone_page.dart';
-//import 'exemple_de_page.dart';
+import 'server_ui.dart';
+import 'zone_page.dart';
+import 'exemple_de_page.dart';
 import 'parking_map_page.dart';
 
 void main() {
@@ -70,7 +70,49 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         child: Column(
           children: [
-            
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ZonePage(),
+                  ),
+                );
+              },
+              child: const Text('Choisir une zone'),
+            ),
+
+            const SizedBox(height: 32),
+
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ExempleDePage(
+                      un_exemple_de_variable: "paramètre de l'exemple de page"
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Open ExempleDePage'),
+            ),
+
+            const SizedBox(height: 32),
+
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ServerTestingPage(),
+                  ),
+                );
+              },
+              child: const Text('Open current UI'),
+            ),
+
+            const SizedBox(height: 32),
 
             ElevatedButton(
               onPressed: () {
