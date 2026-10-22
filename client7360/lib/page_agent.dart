@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'page_agent_accueil.dart';
+
 class PageAgent extends StatelessWidget {
   const PageAgent({super.key});
 
@@ -37,7 +39,14 @@ class PageAgent extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PageAgentAccueil(),
+                      ),
+                    );
+                  },
                   child: const Text('Se connecter'),
                 ),
               ),
