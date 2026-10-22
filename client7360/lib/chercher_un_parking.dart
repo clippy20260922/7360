@@ -4,11 +4,19 @@ class ChercherUnParking extends StatelessWidget {
   const ChercherUnParking({super.key});
 
   Widget _buildButton(String text) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () {},
-        child: Text(text, textAlign: TextAlign.left, ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        height: 42, /// waow 
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            // alignment: Alignment.topLeft,
+          ),
+          onPressed: () {},
+          child: Text(text),
+        ),
       ),
     );
   }
