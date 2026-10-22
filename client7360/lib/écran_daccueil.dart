@@ -39,7 +39,11 @@ class EcranDAccueil extends StatelessWidget {
                         child: FilledButton(
                           style: buttonStyle,
                           onPressed: () {},
-                          child: const Text('Bouton 1'),
+                          child: const Text(
+                            'Je suis usager \n \n'
+                            '(je souhaite juste regarder, voire réserver)',
+                            textAlign: TextAlign.center,
+                          ),
                         ),
                       ),
                       SizedBox.square(
@@ -47,7 +51,11 @@ class EcranDAccueil extends StatelessWidget {
                         child: FilledButton(
                           style: buttonStyle,
                           onPressed: () {},
-                          child: const Text('Bouton 2'),
+                          child: const Text(
+                            'Je suis agent \n \n'
+                            '(je veux contrôler)',
+                            textAlign: TextAlign.center,
+                          ),
                         ),
                       ),
                     ],
@@ -61,7 +69,7 @@ class EcranDAccueil extends StatelessWidget {
               child: FilledButton(
                 style: buttonStyle,
                 onPressed: () {},
-                child: const Text('Bouton du bas'),
+                child: const Text('Réglages'),
               ),
             ),
           ],
