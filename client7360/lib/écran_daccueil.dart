@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'chercher_un_parking.dart';
+import 'page_agent.dart';
 
 class EcranDAccueil extends StatelessWidget {
   const EcranDAccueil({super.key});
@@ -59,7 +60,14 @@ class EcranDAccueil extends StatelessWidget {
                         dimension: buttonSize,
                         child: FilledButton(
                           style: buttonStyle,
-                          onPressed: () {},
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const PageAgent(),
+                              ),
+                            );
+                          },
                           child: const Text(
                             'Je suis agent \n \n'
                             '(je veux contrôler)',
