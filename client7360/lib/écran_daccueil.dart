@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'chercher_un_parking.dart';
+
 class EcranDAccueil extends StatelessWidget {
   const EcranDAccueil({super.key});
 
@@ -38,7 +40,14 @@ class EcranDAccueil extends StatelessWidget {
                         dimension: buttonSize,
                         child: FilledButton(
                           style: buttonStyle,
-                          onPressed: () {},
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ChercherUnParking(),
+                              ),
+                            );
+                          },
                           child: const Text(
                             'Je suis usager \n \n'
                             '(je souhaite juste regarder, voire réserver)',
