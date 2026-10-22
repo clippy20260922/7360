@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'chercher_un_parking.dart';
 import 'page_agent.dart';
+import 'paramètres_page.dart';
 
 class EcranDAccueil extends StatelessWidget {
   const EcranDAccueil({super.key});
@@ -85,7 +86,14 @@ class EcranDAccueil extends StatelessWidget {
               height: 48,
               child: FilledButton(
                 style: buttonStyle,
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ParametresPage(),
+                    ),
+                  );
+                },
                 child: const Text('Réglages'),
               ),
             ),
