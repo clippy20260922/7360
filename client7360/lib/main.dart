@@ -5,6 +5,7 @@ import 'server_ui.dart';
 import 'zone_page.dart';
 import 'exemple_de_page.dart';
 import 'parking_map_page.dart';
+import 'écran_daccueil.dart';
 
 void main() {
   runApp(const MyApp());
@@ -70,6 +71,20 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         child: Column(
           children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const EcranDAccueil(),
+                  ),
+                );
+              },
+              child: const Text('Écran d\'accueil'),
+            ),
+
+            const SizedBox(height: 32),
+
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
