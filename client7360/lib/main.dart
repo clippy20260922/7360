@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'server_ui.dart';
 import 'zone_page.dart';
 import 'exemple_de_page.dart';
+import 'parking_map_page.dart';
 import 'écran_daccueil.dart';
 
 void main() {
@@ -124,6 +125,20 @@ class _MyHomePageState extends State<MyHomePage> {
                 );
               },
               child: const Text('Open current UI'),
+            ),
+
+            const SizedBox(height: 32),
+
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ParkingMapPage(),
+                  ),
+                );
+              },
+              child: const Text('Open map page'),
             ),
           ],
         ),
