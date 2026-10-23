@@ -13,12 +13,74 @@ class ServerTestingPage extends StatefulWidget {
 class _ServerTestingPageState extends State<ServerTestingPage> {
   final String apiUrl = 'http://127.0.0.1:8000';
 
+  // Utilisateur de test du backend.
+  final String utilisateurId = 'ab123456';
+
   int nombrePlacesLibres = 0;
   List<dynamic> placesLibres = [];
+
+  // Véhicules récupérés depuis le backend.
+  List<String> vehicules = [];
+  String? vehiculeSelectionne;
+  bool chargementVehicules = false;
+  String? erreurVehicules;
 
   bool chargement = false;
   int? placeEnCours;
   String? erreur;
+
+  Future<void> chargerVehicules() async {
+    setState(() {
+      chargementVehicules = true;
+      erreurVehicules = null;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('$apiUrl/user/$utilisateurId'),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Erreur HTTP ${response.statusCode}');
+      }
+
+      final resultat =
+          jsonDecode(response.body) as Map<String, dynamic>;
+
+      final donnees = resultat['data'] as List<dynamic>? ?? [];
+
+      // La plaque est le premier champ de vehicle_table.
+      final plaques = donnees
+          .map((vehicule) => (vehicule as List<dynamic>)[0].toString())
+          .toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        vehicules = plaques;
+
+        if (!vehicules.contains(vehiculeSelectionne)) {
+          vehiculeSelectionne =
+              vehicules.isNotEmpty ? vehicules.first : null;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        vehicules = [];
+        vehiculeSelectionne = null;
+        erreurVehicules =
+            'Impossible de récupérer les véhicules : $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          chargementVehicules = false;
+        });
+      }
+    }
+  }
 
   Future<void> chargerPlacesLibres() async {
     setState(() {
@@ -60,20 +122,25 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
   }
 
   Future<void> occuperPlace(int id) async {
+    if (vehiculeSelectionne == null) {
+      setState(() {
+        erreur = 'Veuillez sélectionner un véhicule.';
+      });
+      return;
+    }
+
     setState(() {
       placeEnCours = id;
       erreur = null;
     });
 
     try {
-      // Paramètres temporaires pour la démonstration.
-      // La tâche Jira 3 permettra de choisir le véhicule.
       final url = Uri.parse(
         '$apiUrl/data/$id/set_occupation',
       ).replace(queryParameters: {
         'set_bool': 'true',
         'occupation_time_min': '60',
-        'vehicule': 'AB123CD',
+        'vehicule': vehiculeSelectionne!,
       });
 
       final response = await http.patch(url);
@@ -120,6 +187,7 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
   void initState() {
     super.initState();
     chargerPlacesLibres();
+    chargerVehicules();
   }
 
   @override
@@ -167,6 +235,61 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
                   textAlign: TextAlign.center,
                 ),
               ),
+
+            // Choix du véhicule.
+            const SizedBox(height: 16),
+            const Text(
+              'Choisir mon véhicule',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            if (chargementVehicules)
+              const CircularProgressIndicator()
+            else if (erreurVehicules != null)
+              Text(
+                erreurVehicules!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              )
+            else if (vehicules.isEmpty)
+              const Text('Aucun véhicule enregistré')
+            else
+              DropdownButtonFormField<String>(
+                key: ValueKey(vehiculeSelectionne),
+                initialValue: vehiculeSelectionne,
+                decoration: const InputDecoration(
+                  labelText: 'Plaque d\'immatriculation',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.directions_car),
+                ),
+                items: vehicules.map((plaque) {
+                  return DropdownMenuItem<String>(
+                    value: plaque,
+                    child: Text(plaque),
+                  );
+                }).toList(),
+                onChanged: placeEnCours != null
+                    ? null
+                    : (valeur) {
+                        setState(() {
+                          vehiculeSelectionne = valeur;
+                        });
+                      },
+              ),
+
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: chargementVehicules || placeEnCours != null
+                  ? null
+                  : chargerVehicules,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Actualiser mes véhicules'),
+            ),
+
             const Divider(height: 30),
             const Text(
               'Liste des places libres',
@@ -215,7 +338,9 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
                                 subtitle: Text(details),
                                 trailing: ElevatedButton(
                                   onPressed: chargement ||
-                                          placeEnCours != null
+                                          chargementVehicules ||
+                                          placeEnCours != null ||
+                                          vehiculeSelectionne == null
                                       ? null
                                       : () => occuperPlace(id),
                                   child: placeEnCours == id
