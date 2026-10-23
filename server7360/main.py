@@ -5,14 +5,22 @@ from typing import Annotated
 from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
+from fastapi.middleware.cors import CORSMiddleware
 
 DB_PATH = Path("/data/la-base.db")
 USER_DB_PATH = Path("/data/database-user.db")
 
 app = FastAPI(title="Simple SQLite API")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-app = FastAPI(title="Simple SQLite API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ########## Classes et database ##########
 
