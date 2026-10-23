@@ -11,6 +11,8 @@ class ServerTestingPage extends StatefulWidget {
 
 class _ServerTestingPageState extends State<ServerTestingPage> {
   int _counter = 0;
+  int? _placesLibres;
+  String? _erreurParking;
 
   final TextEditingController _getValueController = TextEditingController();
   final TextEditingController _lastPostController = TextEditingController();
@@ -82,6 +84,40 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
     }
   }
 
+
+
+  Future<void> chargerPlacesLibres() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:8000/data'),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Erreur HTTP ${response.statusCode}');
+      }
+
+      final resultat = jsonDecode(response.body) as Map<String, dynamic>;
+      final places = resultat['data'] as List<dynamic>? ?? [];
+
+      final nombreLibres = places.where((place) {
+        final valeurs = place as List<dynamic>;
+        return valeurs[4] == 0 || valeurs[4] == false;
+      }).length;
+
+      if (!mounted) return;
+
+      setState(() {
+        _placesLibres = nombreLibres;
+        _erreurParking = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _erreurParking = e.toString();
+      });
+    }
+  }
   @override
   void dispose() {
     _getValueController.dispose();
@@ -135,6 +171,31 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
             // wireframe for each widget.
             mainAxisAlignment: .center,
             children: [
+              const Text(
+                'Places de parking disponibles',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+
+              Text(
+                _placesLibres == null
+                    ? 'Cliquez sur Actualiser'
+                    : '$_placesLibres places libres',
+              ),
+
+              if (_erreurParking != null)
+                Text(
+                  _erreurParking!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+
+              ElevatedButton(
+                onPressed: chargerPlacesLibres,
+                child: const Text('Actualiser les places'),
+              ),
+
+              const SizedBox(height: 30),
+
               const Text('You have pushed the button this many times:'),
               Text(
                 '$_counter',
