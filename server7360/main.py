@@ -37,20 +37,71 @@ current_user = User()
 
 ### Fonction d'initilisation de la table des places de parking dans la database principale
 
-def init_slot_db(DB_PATH: Path) -> None:
+def init_batiment_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("CREATE TABLE IF NOT EXISTS batiment_table ("\
+            " batiment_lat float NOT NULL,"\
+            " batiment_long float NOT NULL,"\
+            " PRIMARY KEY (batiment_lat, batiment_long))"
+    )
+    #TODO: créer les batiments qui vous arrangent
+
+def init_rue_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS rue_table ("\
+        " rue_name char[50] NOT NULL,"\
+        " rue_ville char[40] NOT NULL,"\
+        " rue_lat float NOT NULL,"\
+        " rue_long float NOT NULL,"\
+        " PRIMARY KEY (rue_name, rue_ville))"
+    )
+    row = conn.execute("SELECT rue_name FROM rue_table").fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO rue_table (rue_name, rue_ville, rue_lat, float) "\
+            "VALUES ('rue du test', Champs-Sur-Marne', 1.21, 2.35), ('rue de l'esiee','Champs-Sur-Marne', 1.00, 2.00)"
+        )
+    conn.commit()
+    conn.close()
+    
+def init_parking_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS parking_table ("\
+        " parking_name char[40] PRIMARY KEY,"\
+        " parking_adresse char[100] NOT NULL,"\
+        " parking_lat float NOT NULL,"\
+        " parking_long float NOT NULL)"
+    )
+    row = conn.execute("SELECT parking_name FROM parking_table").fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long) "\
+            "VALUES ('Le Parking', '1 rue du test, Champs-Sur-Marne', 1.22, 2.35), ('L'autre parking', '7 rue du test, Champs-Sur-Marne', 1.02, 2.01)"
+        )
+    conn.commit()
+    conn.close()
+    
+def init_slot_table(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS slot_table ("\
         " slot_id INTEGER PRIMARY KEY,"\
+        " slot_adresse char[60],"\
+        " slot_ville char[40],"\
         " slot_lat float NOT NULL,"\
         " slot_long float NOT NULL,"\
         " slot_type char[4] NOT NULL, "\
-        " slot_occupied boolean DEFAULT false,"\
-        " slot_pmr boolean,"\
-        " slot_elec boolean,"\
+        " slot_pmr boolean DEFAULT false,"\
+        " slot_elec boolean DEFAULT false,"\
         " parking char[20] DEFAULT NULL,"\
-        " parking_protege boolean,"\
+        " slot_tarif float NOT NULL,"\
+        " slot_occupied boolean DEFAULT false,"\
         " fin_occupation timestamp NOT NULL DEFAULT '1900-01-01 00:00:00')"
     )
     row = conn.execute("SELECT slot_id FROM slot_table WHERE slot_id = 1").fetchone()
@@ -71,7 +122,7 @@ def init_slot_db(DB_PATH: Path) -> None:
 
 ### Fonction d'initilisation de la table des véhicules dans la database principale
 
-def init_vehicule_db(DB_PATH: Path) -> None:
+def init_vehicule_table(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS vehicle_table")
@@ -93,7 +144,7 @@ def init_vehicule_db(DB_PATH: Path) -> None:
 
 ### Fonction d'initilisation de la table des utilisateurs dans la database des utilisateurs
 
-def init_user_db(DB_PATH: Path) -> None:
+def init_user_table(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(USER_DB_PATH)
     conn.execute("DROP TABLE IF EXISTS user_table")
@@ -101,6 +152,9 @@ def init_user_db(DB_PATH: Path) -> None:
             "CREATE TABLE IF NOT EXISTS user_table ("\
                 " username char[30] PRIMARY KEY,"\
                 " password char[100] NOT NULL,"\
+                " nom char[100] NOT NULL,"\
+                " prenom char[100] NOT NULL,"\
+                " PMR bool DEFAULT false,"\
                 " type char[5] NOT NULL)"
     )
     row = conn.execute("SELECT * FROM user_table").fetchone()
@@ -119,9 +173,13 @@ class DataPayload(BaseModel):
 
 @app.on_event("startup")
 def startup_event() -> None:
-    init_slot_db(DB_PATH)
-    init_vehicule_db(DB_PATH)
-    init_user_db(USER_DB_PATH)
+    init_slot_table(DB_PATH)
+    init_vehicule_table(DB_PATH)
+    init_parking_table(DB_PATH)
+    init_rue_table(DB_PATH)
+    init_batiment_table(DB_PATH)
+    init_user_table(USER_DB_PATH)
+    
     
 @app.get("/")
 def root() -> dict:
