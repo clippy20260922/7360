@@ -50,6 +50,10 @@ class ParkingService {
   }
 }
 
+/// Plan de démonstration, réutilisable hors de cette page (ex. partie agent)
+/// quand le serveur ne fournit pas encore `GET /parking`.
+ParkingData buildDemoParkingData() => _ParkingMapPageState._demoData;
+
 // ───────────────────────── Page ─────────────────────────
 
 /// Page qui affiche le plan du parking dans un rectangle centré.
