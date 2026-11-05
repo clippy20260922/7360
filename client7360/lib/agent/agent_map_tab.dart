@@ -316,7 +316,7 @@ class _SpotPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                spot.isLot ? 'Parking ${spot.id}' : 'Place ${spot.id}',
+                spot.isLot ? spot.id : 'Place ${spot.id}',
                 style: const TextStyle(
                   color: AgentColors.ink,
                   fontSize: 19,
@@ -465,7 +465,8 @@ class _SpotPanel extends StatelessWidget {
           if (i.plate == null) ...[
             const SizedBox(height: 10),
             const Text(
-              "Le serveur ne fournit pas encore l'immatriculation du véhicule.",
+              "Aucun véhicule n'est enregistré sur cette place : "
+              "l'immatriculation n'est pas connue.",
               style: TextStyle(color: AgentColors.muted, fontSize: 12),
             ),
           ],
@@ -479,11 +480,6 @@ class _SpotPanel extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-        if (i.simulated) ...[
-          const SizedBox(height: 12),
-          const Tag(Icons.science_outlined, 'Données simulées (démo)',
-              color: AgentColors.warn),
-        ],
       ],
     ];
   }

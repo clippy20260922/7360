@@ -307,9 +307,6 @@ class _ViolationCard extends StatelessWidget {
                 Tag(Icons.local_parking_rounded, info.parking!),
               if (info.owner != null)
                 Tag(Icons.person_rounded, info.owner!),
-              if (info.simulated)
-                const Tag(Icons.science_outlined, 'Simulé',
-                    color: AgentColors.warn),
               if (fined)
                 const Tag(Icons.task_alt_rounded, 'Contravention dressée',
                     color: AgentColors.ok),

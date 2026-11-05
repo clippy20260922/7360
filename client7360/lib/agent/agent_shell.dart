@@ -113,23 +113,39 @@ class _AgentShellState extends State<AgentShell> {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            _DemoBanner(controller: _controller),
-            Expanded(
-              // IndexedStack : la carte garde son zoom / sa rotation
-              // quand on passe sur un autre onglet.
-              child: IndexedStack(
-                index: _index,
-                children: [
-                  AgentMapTab(controller: _controller),
-                  AgentViolationsTab(controller: _controller),
-                  AgentStatsTab(controller: _controller),
-                  AgentFinesTab(controller: _controller),
-                ],
-              ),
-            ),
-          ],
+        body: ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) {
+            final c = _controller;
+            if (c.snapshot == null) {
+              // Premier chargement : spinner, ou erreur avec bouton « Réessayer »
+              if (c.loading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return _ErrorState(
+                message: c.error ?? 'Erreur inconnue',
+                onRetry: c.refresh,
+              );
+            }
+            return Column(
+              children: [
+                if (c.error != null) _ConnectionBanner(message: c.error!),
+                Expanded(
+                  // IndexedStack : la carte garde son zoom / sa rotation
+                  // quand on passe sur un autre onglet.
+                  child: IndexedStack(
+                    index: _index,
+                    children: [
+                      AgentMapTab(controller: c),
+                      AgentViolationsTab(controller: c),
+                      AgentStatsTab(controller: c),
+                      AgentFinesTab(controller: c),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         bottomNavigationBar: ListenableBuilder(
           listenable: _controller,
@@ -176,45 +192,82 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
-/// Bandeau affiché quand le serveur ne fournit pas le plan : on travaille
-/// alors sur des données de démonstration.
-class _DemoBanner extends StatelessWidget {
-  const _DemoBanner({required this.controller});
+/// Bandeau affiché quand un rafraîchissement échoue : les dernières données
+/// restent à l'écran.
+class _ConnectionBanner extends StatelessWidget {
+  const _ConnectionBanner({required this.message});
 
-  final AgentController controller;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final snap = controller.snapshot;
-        if (snap == null || !snap.mapIsDemo) return const SizedBox.shrink();
-        return Container(
-          width: double.infinity,
-          color: AgentColors.warn.withValues(alpha: 0.18),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          child: Row(
-            children: [
-              const Icon(Icons.science_outlined,
-                  size: 16, color: Color(0xFF8A5B00)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Mode démo : plan simulé (${snap.error ?? "API indisponible"})',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF8A5B00),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    return Container(
+      width: double.infinity,
+      color: AgentColors.bad.withValues(alpha: 0.14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 16, color: AgentColors.bad),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Connexion perdue : $message',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AgentColors.bad,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
-            ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
+    );
+  }
+}
+
+/// Écran affiché quand le tout premier chargement échoue.
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_rounded,
+                size: 56, color: AgentColors.muted),
+            const SizedBox(height: 14),
+            const Text(
+              'Impossible de charger les données',
+              style: TextStyle(
+                color: AgentColors.ink,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AgentColors.muted),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

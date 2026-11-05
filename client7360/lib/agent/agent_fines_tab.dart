@@ -160,7 +160,7 @@ class _FineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = fine.offense.color;
+    final color = fine.color;
     return AgentCard(
       accent: color,
       child: Column(
@@ -187,7 +187,7 @@ class _FineCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            fine.offense.label,
+            fine.offenseLabel,
             style: const TextStyle(
               color: AgentColors.ink,
               fontSize: 15.5,
@@ -226,9 +226,6 @@ class _FineCard extends StatelessWidget {
                     : Icons.directions_car_rounded,
                 fine.vehicleLabel,
               ),
-              if (fine.simulated)
-                const Tag(Icons.science_outlined, 'Démo',
-                    color: AgentColors.warn),
             ],
           ),
         ],

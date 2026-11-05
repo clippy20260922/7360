@@ -247,16 +247,6 @@ class _PageAgentState extends State<PageAgent> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      // Pratique tant que le serveur n'est pas lancé ; à retirer
-                      // pour la version finale.
-                      TextButton(
-                        onPressed: _busy ? null : () => _openAgentPage('démo'),
-                        child: const Text(
-                          'Continuer en mode démo (sans serveur)',
-                          style: TextStyle(color: Color(0xFF9FB0D0)),
-                        ),
-                      ),
                     ],
                   ),
                 ),

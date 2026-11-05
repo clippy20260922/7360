@@ -105,6 +105,9 @@ class PlateBadge extends StatelessWidget {
     if (plate == null) {
       return const Tag(Icons.help_outline_rounded, 'Plaque non fournie');
     }
+    // « AB123CD » → « AB-123-CD » (format SIV)
+    final m = RegExp(r'^([A-Z]{2})(\d{3})([A-Z]{2})$').firstMatch(plate!);
+    final shown = m == null ? plate! : '${m[1]}-${m[2]}-${m[3]}';
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
@@ -133,7 +136,7 @@ class PlateBadge extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               child: Text(
-                plate!,
+                shown,
                 style: const TextStyle(
                   color: AgentColors.navy,
                   fontSize: 17,

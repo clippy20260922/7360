@@ -95,12 +95,14 @@ class _FineSheet extends StatefulWidget {
 }
 
 class _FineSheetState extends State<_FineSheet> {
-  late final DateTime _now = DateTime.now().toUtc();
-  late Offense _offense =
-      Offense.defaultFor(widget.info.complianceAt(_now));
+  late final DateTime _now = AgentService.now();
+  late Offense? _offense = defaultOffenseFor(
+      widget.controller.offenses, widget.info.complianceAt(_now));
   final _plate = TextEditingController();
   final _comment = TextEditingController();
-  String? _error;
+  String? _error; // erreur sur la plaque
+  String? _submitError; // refus du serveur / réseau
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -109,37 +111,70 @@ class _FineSheetState extends State<_FineSheet> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    final o = _offense;
+    if (o == null || _busy) return;
     final known = widget.info.plate;
     final plate = (known ?? _plate.text).trim().toUpperCase();
     if (plate.isEmpty) {
       setState(() => _error = "Renseignez l'immatriculation du véhicule.");
       return;
     }
-    final comment = _comment.text.trim();
-    final fine = widget.controller.issueFine(
-      info: widget.info,
-      offense: _offense,
-      plate: plate,
-      comment: comment.isEmpty ? null : comment,
-    );
-    final messenger = ScaffoldMessenger.of(context);
-    Navigator.of(context).pop();
-    messenger.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AgentColors.navy,
-        content: Text(
-          'Contravention ${fine.id} dressée · ${formatEuro(fine.amount)}',
+    setState(() {
+      _busy = true;
+      _error = null;
+      _submitError = null;
+    });
+    try {
+      final comment = _comment.text.trim();
+      final fine = await widget.controller.issueFine(
+        info: widget.info,
+        offense: o,
+        plate: plate,
+        comment: comment.isEmpty ? null : comment,
+      );
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AgentColors.navy,
+          content: Text(
+            'Contravention ${fine.id} dressée · ${formatEuro(fine.amount)}',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _submitError = AgentService.describeError(e);
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final info = widget.info;
     final compliance = info.complianceAt(_now);
+    final o = _offense;
+
+    if (o == null) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: const Text(
+          "La liste des infractions n'a pas pu être chargée depuis le "
+          'serveur. Fermez cette fenêtre et réessayez.',
+          style: TextStyle(color: AgentColors.ink, fontWeight: FontWeight.w600),
+        ),
+      );
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -256,16 +291,16 @@ class _FineSheetState extends State<_FineSheet> {
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<Offense>(
-                    value: _offense,
+                    value: o,
                     isExpanded: true,
                     borderRadius: BorderRadius.circular(14),
                     icon: const Icon(Icons.expand_more_rounded),
                     items: [
-                      for (final o in Offense.values)
+                      for (final item in widget.controller.offenses)
                         DropdownMenuItem(
-                          value: o,
+                          value: item,
                           child: Text(
-                            '${o.label} · ${formatEuro(o.amount)}',
+                            '${item.label} · ${formatEuro(item.amount)}',
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w700,
@@ -274,8 +309,8 @@ class _FineSheetState extends State<_FineSheet> {
                           ),
                         ),
                     ],
-                    onChanged: (o) {
-                      if (o != null) setState(() => _offense = o);
+                    onChanged: (picked) {
+                      if (picked != null) setState(() => _offense = picked);
                     },
                   ),
                 ),
@@ -285,10 +320,10 @@ class _FineSheetState extends State<_FineSheet> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: _offense.color.withValues(alpha: 0.10),
+                  color: o.color.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                      color: _offense.color.withValues(alpha: 0.45)),
+                      color: o.color.withValues(alpha: 0.45)),
                 ),
                 child: Row(
                   children: [
@@ -305,9 +340,9 @@ class _FineSheetState extends State<_FineSheet> {
                             ),
                           ),
                           Text(
-                            formatEuro(_offense.amount),
+                            formatEuro(o.amount),
                             style: TextStyle(
-                              color: _offense.color,
+                              color: o.color,
                               fontSize: 34,
                               fontWeight: FontWeight.w900,
                             ),
@@ -320,7 +355,7 @@ class _FineSheetState extends State<_FineSheet> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            _offense.legal,
+                            o.legal,
                             textAlign: TextAlign.right,
                             style: const TextStyle(
                               color: AgentColors.ink,
@@ -330,8 +365,8 @@ class _FineSheetState extends State<_FineSheet> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _offense.majorated != null
-                                ? 'Majoré : ${formatEuro(_offense.majorated!)}'
+                            o.majorated != null
+                                ? 'Majoré : ${formatEuro(o.majorated!)}'
                                 : 'Montant fixé par la commune',
                             textAlign: TextAlign.right,
                             style: const TextStyle(
@@ -360,6 +395,25 @@ class _FineSheetState extends State<_FineSheet> {
                   ),
                 ),
               ),
+              if (_submitError != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AgentColors.bad.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _submitError!,
+                    style: const TextStyle(
+                      color: AgentColors.bad,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               SizedBox(
                 width: double.infinity,
@@ -371,15 +425,24 @@ class _FineSheetState extends State<_FineSheet> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  icon: const Icon(Icons.gavel_rounded),
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.gavel_rounded),
                   label: Text(
-                    'Dresser la contravention · ${formatEuro(_offense.amount)}',
+                    'Dresser la contravention · ${formatEuro(o.amount)}',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  onPressed: _submit,
+                  onPressed: _busy ? null : _submit,
                 ),
               ),
             ],

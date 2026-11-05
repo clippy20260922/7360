@@ -1,20 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:flutter/material.dart' show IconData, Icons;
 import 'package:http/http.dart' as http;
 
-import '../parking_map_page.dart' show ParkingService, buildDemoParkingData;
+import '../parking_map_page.dart' show ParkingService;
 import '../parking_map_view.dart';
 import 'agent_fines.dart';
 import 'agent_models.dart';
 
-// ───────────────────────── Connexion ─────────────────────────
+// ───────────────────────── Erreurs ─────────────────────────
 
+/// Identifiants refusés (ou compte qui n'est pas un compte agent).
 class AgentAuthException implements Exception {
   AgentAuthException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Réponse d'erreur du serveur (avec son message `detail`).
+class AgentApiException implements Exception {
+  AgentApiException(this.message);
   final String message;
   @override
   String toString() => message;
@@ -134,21 +142,17 @@ class AgentStats {
 
 // ───────────────────────── Instantané ─────────────────────────
 
-/// Tout ce que les trois onglets affichent, à un instant donné.
+/// Tout ce que les onglets affichent, à un instant donné.
 class AgentSnapshot {
   AgentSnapshot({
     required this.map,
     required this.slots,
-    required this.mapIsDemo,
     required this.fetchedAt,
-    this.error,
   }) : _byId = {for (final s in slots) s.id: s};
 
   final ParkingData map;
   final List<SlotInfo> slots;
-  final bool mapIsDemo;
-  final DateTime fetchedAt; // UTC
-  final String? error;
+  final DateTime fetchedAt; // heure du serveur, en UTC
   final Map<String, SlotInfo> _byId;
 
   SlotInfo? slotById(String id) => _byId[id];
@@ -166,211 +170,183 @@ class AgentSnapshot {
       AgentStats.compute(slots, map.spots, fetchedAt);
 }
 
-// ───────────────────────── Service ─────────────────────────
+// ───────────────────────── Service (appels au serveur) ─────────────────────────
 
 class AgentService {
   static const _timeout = Duration(seconds: 10);
+  static const _jsonHeaders = {'Content-Type': 'application/json'};
+
+  static String get _base => ParkingService.baseUrl;
 
   /// Identifiant de l'agent connecté (null = pas connecté).
   static String? agentId;
+
+  // Gardé en mémoire le temps de la session : le serveur retient « qui est
+  // connecté » en un seul exemplaire, donc s'il redémarre (ou si quelqu'un
+  // d'autre se connecte) on se reconnecte tout seul.
+  static String? _password;
+
+  /// Écart entre l'horloge du serveur et celle de l'appareil.
+  static Duration _clockOffset = Duration.zero;
+
+  /// Maintenant, à l'heure du serveur (UTC).
+  static DateTime now() => DateTime.now().toUtc().add(_clockOffset);
 
   /// POST /token (formulaire OAuth2). Lève [AgentAuthException] si refusé ;
   /// toute autre exception = serveur injoignable.
   static Future<void> login(String username, String password) async {
     final res = await http
         .post(
-          Uri.parse('${ParkingService.baseUrl}/token'),
+          Uri.parse('$_base/token'),
           body: {'username': username, 'password': password},
         )
         .timeout(_timeout);
-
-    if (res.statusCode == 200) {
-      agentId = username;
-      return;
+    if (res.statusCode != 200) {
+      throw AgentAuthException(
+          _detail(res, 'Identifiant ou mot de passe incorrect.'));
     }
-    var message = 'Identifiant ou mot de passe incorrect.';
-    try {
-      final detail = (jsonDecode(res.body) as Map<String, dynamic>)['detail'];
-      if (detail is String && detail.isNotEmpty) message = detail;
-    } catch (_) {}
-    throw AgentAuthException(message);
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (body['type'] != 'agent') {
+      throw AgentAuthException("Ce compte n'est pas un compte agent.");
+    }
+    agentId = username;
+    _password = password;
   }
 
-  static void logout() => agentId = null;
+  static void logout() {
+    agentId = null;
+    _password = null;
+  }
 
-  /// Charge le plan (GET /parking) et les fiches de places (GET /data).
-  /// Chaque morceau manquant est remplacé par des données de démonstration,
-  /// sans jamais lever d'exception.
+  /// Message d'erreur lisible pour l'interface.
+  static String describeError(Object e) {
+    if (e is AgentAuthException) return e.message;
+    if (e is AgentApiException) return e.message;
+    return 'Serveur injoignable ($_base). Vérifiez qu\'il est lancé.';
+  }
+
+  static String _detail(http.Response res, String fallback) {
+    try {
+      final detail = (jsonDecode(utf8.decode(res.bodyBytes))
+          as Map<String, dynamic>)['detail'];
+      if (detail is String && detail.isNotEmpty) return detail;
+    } catch (_) {}
+    return fallback;
+  }
+
+  static bool _needsLogin(http.Response res) {
+    if (res.statusCode == 403) return true;
+    return res.statusCode == 400 &&
+        _detail(res, '').startsWith('Authentifiez');
+  }
+
+  /// Envoie une requête d'agent ; si le serveur ne nous reconnaît plus, on
+  /// se reconnecte puis on réessaie une fois.
+  static Future<http.Response> _send(
+      Future<http.Response> Function() request) async {
+    var res = await request().timeout(_timeout);
+    final id = agentId, pwd = _password;
+    if (_needsLogin(res) && id != null && pwd != null) {
+      await login(id, pwd);
+      res = await request().timeout(_timeout);
+    }
+    return res;
+  }
+
+  static Map<String, dynamic> _json(http.Response res, String errorMessage) {
+    if (res.statusCode != 200) {
+      throw AgentApiException(_detail(res, '$errorMessage (${res.statusCode})'));
+    }
+    return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// Charge le plan (GET /parking) et les places avec leur véhicule
+  /// (GET /agent/slots).
   static Future<AgentSnapshot> load() async {
-    ParkingData map;
-    var mapIsDemo = false;
-    String? error;
-    try {
-      map = await ParkingService.fetch();
-      if (map.spots.isEmpty && map.roads.isEmpty && map.buildings.isEmpty) {
-        throw Exception('plan vide');
-      }
-    } catch (e) {
-      map = buildDemoParkingData();
-      mapIsDemo = true;
-      error = e.toString().replaceFirst('Exception: ', '');
+    final mapRes = await http.get(Uri.parse('$_base/parking')).timeout(_timeout);
+    final map = ParkingData.fromJson(_json(mapRes, 'Plan indisponible'));
+
+    final res = await _send(() => http.get(Uri.parse('$_base/agent/slots')));
+    final body = _json(res, 'Places indisponibles');
+
+    final serverNow = parseServerTime(body['now'] as String?, keepOldDates: true);
+    if (serverNow != null) {
+      _clockOffset = serverNow.difference(DateTime.now().toUtc());
     }
-
-    var rows = <SlotInfo>[];
-    try {
-      rows = await _fetchSlots();
-    } catch (_) {
-      // Les fiches manquantes sont simulées plus bas.
-    }
-
-    final mapIds = {for (final s in map.spots) s.id: s};
-    // Avec un vrai plan, toute ligne de la base compte (même hors plan).
-    // Avec le plan de démo, on ne garde que les lignes qui y figurent.
-    final slots = <SlotInfo>[
-      for (final r in rows)
-        if (!mapIsDemo || mapIds.containsKey(r.id)) r,
-    ];
-    final known = {for (final s in slots) s.id};
-
-    // La carte et les fiches doivent raconter la même chose.
-    for (final s in slots) {
-      final spot = mapIds[s.id];
-      if (spot != null && !spot.isLot && spot.status != SpotStatus.reserved) {
-        spot.status = s.occupied ? SpotStatus.occupied : SpotStatus.free;
-      }
-    }
-
-    final epoch = _epoch;
-    for (final spot in map.spots) {
-      if (spot.isLot || known.contains(spot.id)) continue;
-      slots.add(_simulate(spot, epoch));
-    }
-
     return AgentSnapshot(
       map: map,
-      slots: slots,
-      mapIsDemo: mapIsDemo,
-      fetchedAt: DateTime.now().toUtc(),
-      error: error,
+      slots: [
+        for (final r in (body['data'] as List? ?? const []))
+          SlotInfo.fromJson(r as Map<String, dynamic>),
+      ],
+      fetchedAt: now(),
     );
   }
 
-  static Future<List<SlotInfo>> _fetchSlots() async {
-    final res = await http
-        .get(Uri.parse('${ParkingService.baseUrl}/data'))
-        .timeout(_timeout);
-    if (res.statusCode != 200) {
-      throw Exception('Erreur serveur (${res.statusCode})');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final rows = body['data'] as List<dynamic>? ?? const [];
+  /// GET /agent/infractions : la liste déroulante des contraventions.
+  static Future<List<Offense>> fetchOffenses() async {
+    final res =
+        await _send(() => http.get(Uri.parse('$_base/agent/infractions')));
+    final body = _json(res, 'Infractions indisponibles');
     return [
-      for (final r in rows)
-        if (r is List && r.length >= 12) SlotInfo.fromRow(r),
+      for (final o in (body['data'] as List? ?? const []))
+        Offense.fromJson(o as Map<String, dynamic>),
     ];
   }
 
-  // ───────── Données simulées (mode démo) ─────────
+  /// GET /agent/fines : les contraventions, les plus récentes d'abord.
+  static Future<List<Fine>> fetchFines() async {
+    final res = await _send(() => http.get(Uri.parse('$_base/agent/fines')));
+    final body = _json(res, 'Contraventions indisponibles');
+    return [
+      for (final f in (body['data'] as List? ?? const []))
+        Fine.fromJson(f as Map<String, dynamic>),
+    ];
+  }
 
-  static final DateTime _epoch = DateTime.now().toUtc();
-
-  static SlotInfo _simulate(ParkingSpot spot, DateTime epoch) {
-    var h = 17;
-    for (final c in spot.id.codeUnits) {
-      h = (h * 31 + c) & 0x7fffffff;
-    }
-    final r = math.Random(h);
-    final isMoto = spot.width < 1.5;
-    final occupied = spot.status == SpotStatus.occupied;
-
-    DateTime? end;
-    if (occupied) {
-      final roll = r.nextInt(100);
-      if (roll < 60) {
-        end = epoch.add(Duration(minutes: 45 + r.nextInt(430))); // en règle
-      } else if (roll < 68) {
-        end = epoch.add(Duration(minutes: 3 + r.nextInt(6))); // expire bientôt
-      } else if (roll < 90) {
-        end = epoch.subtract(Duration(minutes: 5 + r.nextInt(200))); // retard
-      } // sinon : aucun paiement
-    }
-
-    const letters = 'ABCDEFGHJKLMNPQRSTVWXYZ';
-    String l() => letters[r.nextInt(letters.length)];
-    return SlotInfo(
-      id: spot.id,
-      type: isMoto ? 'moto' : 'voit',
-      pmr: r.nextInt(100) < 6,
-      elec: r.nextInt(100) < 8,
-      occupied: occupied,
-      reserved: spot.status == SpotStatus.reserved,
-      address: 'Plan de démonstration',
-      tariff: isMoto ? 0.8 : 1.2 + (h % 5) * 0.4,
-      plate: occupied ? '${l()}${l()}-${100 + r.nextInt(900)}-${l()}${l()}' : null,
-      owner: occupied ? 'usager${1000 + r.nextInt(9000)}' : null,
-      endsAt: end,
-      simulated: true,
-    );
+  /// POST /agent/fines : dresse une contravention (l'agent, le montant, le
+  /// lieu… sont complétés par le serveur).
+  static Future<Fine> createFine({
+    required String slotId,
+    required String offenseCode,
+    String? plate,
+    String? comment,
+  }) async {
+    final id = int.tryParse(slotId);
+    if (id == null) throw AgentApiException('Place invalide ($slotId)');
+    final res = await _send(() => http.post(
+          Uri.parse('$_base/agent/fines'),
+          headers: _jsonHeaders,
+          body: jsonEncode({
+            'slot_id': id,
+            'offense': offenseCode,
+            'plate': plate,
+            'comment': comment,
+          }),
+        ));
+    final body = _json(res, 'Contravention refusée');
+    return Fine.fromJson(body['data'] as Map<String, dynamic>);
   }
 }
 
 // ───────────────────────── Contrôleur partagé par les onglets ─────────────────────────
 
 class AgentController extends ChangeNotifier {
-  AgentController({this.agentId = 'agent'}) {
-    fines.addAll(buildDemoFines(DateTime.now().toUtc()));
-  }
+  AgentController({this.agentId = 'agent'});
 
-  /// Identifiant de l'agent connecté (inscrit sur chaque contravention).
+  /// Identifiant de l'agent connecté.
   final String agentId;
 
   AgentSnapshot? snapshot;
-  bool loading = true;
+  List<Offense> offenses = [];
+  List<Fine> fines = []; // les plus récentes d'abord
   final List<double> occupancyHistory = [];
 
-  /// Contraventions, les plus récentes d'abord. Pour l'instant en mémoire
-  /// (démo) : à remplacer par un appel à l'API / la base de données.
-  final List<Fine> fines = [];
-  int _nextFineNumber = 1042;
+  bool loading = true;
 
-  /// Contravention récente (moins de 12 h) déjà dressée pour cette place.
-  Fine? recentFineFor(String slotId) {
-    final now = DateTime.now().toUtc();
-    for (final f in fines) {
-      if (!f.simulated &&
-          f.slotId == slotId &&
-          now.difference(f.issuedAt) < const Duration(hours: 12)) {
-        return f;
-      }
-    }
-    return null;
-  }
-
-  /// Dresse une contravention. TODO : POST vers le serveur quand la route
-  /// existera ; pour l'instant elle est seulement ajoutée à la liste locale.
-  Fine issueFine({
-    required SlotInfo info,
-    required Offense offense,
-    required String plate,
-    String? comment,
-  }) {
-    final now = DateTime.now().toUtc();
-    final fine = Fine(
-      id: 'PV-${now.year}-${(_nextFineNumber++).toString().padLeft(5, '0')}',
-      plate: plate,
-      vehicleType: info.type,
-      slotId: info.id,
-      location: info.location,
-      agentId: agentId,
-      offense: offense,
-      amount: offense.amount,
-      issuedAt: now,
-      comment: comment,
-    );
-    fines.insert(0, fine);
-    notifyListeners();
-    return fine;
-  }
+  /// Dernière erreur de chargement (null quand tout va bien). Si on a déjà
+  /// des données, elles restent affichées.
+  String? error;
 
   Timer? _timer;
   bool _busy = false;
@@ -386,15 +362,52 @@ class AgentController extends ChangeNotifier {
     _busy = true;
     try {
       final s = await AgentService.load();
+      final f = await AgentService.fetchFines();
+      if (offenses.isEmpty) offenses = await AgentService.fetchOffenses();
       if (_disposed) return;
       snapshot = s;
-      loading = false;
+      fines = f;
+      error = null;
       occupancyHistory.add(s.stats.occupancyRate);
       if (occupancyHistory.length > 30) occupancyHistory.removeAt(0);
-      notifyListeners();
+    } catch (e) {
+      error = AgentService.describeError(e);
     } finally {
       _busy = false;
+      loading = false;
+      if (!_disposed) notifyListeners();
     }
+  }
+
+  /// Contravention récente (moins de 12 h) déjà dressée pour cette place.
+  Fine? recentFineFor(String slotId) {
+    final now = AgentService.now();
+    for (final f in fines) {
+      if (f.slotId == slotId &&
+          now.difference(f.issuedAt) < const Duration(hours: 12)) {
+        return f;
+      }
+    }
+    return null;
+  }
+
+  /// Dresse une contravention sur le serveur. Lève une exception (avec le
+  /// message du serveur) si elle est refusée.
+  Future<Fine> issueFine({
+    required SlotInfo info,
+    required Offense offense,
+    required String plate,
+    String? comment,
+  }) async {
+    final fine = await AgentService.createFine(
+      slotId: info.id,
+      offenseCode: offense.code,
+      plate: plate,
+      comment: comment,
+    );
+    fines = [fine, ...fines];
+    if (!_disposed) notifyListeners();
+    return fine;
   }
 
   @override

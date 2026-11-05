@@ -61,8 +61,20 @@ String formatPercent(double ratio) => '${(ratio * 100).round()} %';
 
 // ───────────────────────── Place + véhicule ─────────────────────────
 
+/// Date renvoyée par le serveur (« 2026-11-05 23:15:10 », en UTC) → DateTime UTC.
+/// Renvoie null pour une absence de date ou pour la valeur par défaut 1900
+/// (= aucun paiement enregistré).
+DateTime? parseServerTime(String? raw, {bool keepOldDates = false}) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final parsed = DateTime.tryParse(raw.endsWith('Z') ? raw : '${raw}Z');
+  if (parsed == null) return null;
+  if (!keepOldDates && parsed.year <= 2000) return null;
+  return parsed;
+}
+
 /// Informations de contrôle d'une place : la place elle-même (ligne de
-/// `slot_table`) et le véhicule qui y est garé s'il y en a un.
+/// `slot_table`) et le véhicule qui y est garé s'il y en a un
+/// (une entrée de `GET /agent/slots`).
 class SlotInfo {
   const SlotInfo({
     required this.id,
@@ -78,38 +90,22 @@ class SlotInfo {
     this.plate,
     this.owner,
     this.endsAt,
-    this.simulated = false,
   });
 
-  /// Une ligne de `GET /data` :
-  /// [slot_id, adresse, ville, lat, long, type, pmr, elec, parking,
-  ///  tarif, occupée, fin_occupation].
-  factory SlotInfo.fromRow(List<dynamic> r) {
-    bool b(dynamic v) => v == true || v == 1 || v == '1' || v == 'true';
-    String? s(dynamic v) =>
-        (v == null || v.toString().trim().isEmpty) ? null : v.toString();
-
-    DateTime? end;
-    final raw = s(r[11]);
-    if (raw != null) {
-      // La base stocke des CURRENT_TIMESTAMP, donc de l'UTC.
-      final parsed = DateTime.tryParse(raw.endsWith('Z') ? raw : '${raw}Z');
-      // 1900-01-01 = valeur par défaut : aucun paiement enregistré.
-      if (parsed != null && parsed.year > 2000) end = parsed;
-    }
-    return SlotInfo(
-      id: r[0].toString(),
-      address: s(r[1]),
-      city: s(r[2]),
-      type: s(r[5]) ?? 'voit',
-      pmr: b(r[6]),
-      elec: b(r[7]),
-      parking: s(r[8]),
-      tariff: (r[9] as num?)?.toDouble() ?? 0,
-      occupied: b(r[10]),
-      endsAt: end,
-    );
-  }
+  factory SlotInfo.fromJson(Map<String, dynamic> j) => SlotInfo(
+        id: j['id'].toString(),
+        type: j['type'] as String? ?? 'voit',
+        pmr: j['pmr'] == true,
+        elec: j['elec'] == true,
+        occupied: j['occupied'] == true,
+        address: j['address'] as String?,
+        city: j['city'] as String?,
+        parking: j['parking'] as String?,
+        tariff: (j['tariff'] as num?)?.toDouble() ?? 0,
+        plate: j['plate'] as String?,
+        owner: j['owner'] as String?,
+        endsAt: parseServerTime(j['fin_occupation'] as String?),
+      );
 
   final String id;
   final String type; // 'voit' | 'moto'
@@ -117,14 +113,12 @@ class SlotInfo {
   final String? address, city, parking;
   final double tariff;
 
-  /// Véhicule garé (null quand l'API ne le fournit pas).
+  /// Véhicule garé et son propriétaire (null s'il n'y a pas de véhicule
+  /// enregistré sur la place).
   final String? plate, owner;
 
   /// Fin du stationnement payé, en UTC (null = aucun paiement).
   final DateTime? endsAt;
-
-  /// Vrai quand la fiche a été fabriquée côté client (mode démo).
-  final bool simulated;
 
   String get typeLabel => type == 'moto' ? 'Moto' : 'Voiture';
 
