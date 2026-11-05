@@ -1,7 +1,8 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import HTTPException, Query, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Annotated
+from typing import Annotated, AsyncIterator
 from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
@@ -10,7 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 DB_PATH = Path("/data/la-base.db")
 USER_DB_PATH = Path("/data/database-user.db")
 
-app = FastAPI(title="Simple SQLite API")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_event()
+    yield
+
+
+app = FastAPI(title="Simple SQLite API", lifespan=lifespan)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -171,7 +178,6 @@ class DataPayload(BaseModel):
     value: str
 
 
-@app.on_event("startup")
 def startup_event() -> None:
     init_slot_table(DB_PATH)
     init_vehicule_table(DB_PATH)
