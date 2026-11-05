@@ -1,7 +1,8 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import HTTPException, Query, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Annotated
+from typing import Annotated, AsyncIterator
 from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
@@ -17,7 +18,13 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = DATA_DIR / "la-base.db"
 USER_DB_PATH = DATA_DIR / "database-user.db"
 
-app = FastAPI(title="Simple SQLite API")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_event()
+    yield
+
+
+app = FastAPI(title="Simple SQLite API", lifespan=lifespan)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -92,7 +99,10 @@ def init_rue_table(DB_PATH: Path) -> None:
     if row is None:
         conn.executemany(
             "INSERT INTO rue_table (rue_name, rue_ville, rue_lat, rue_long) VALUES (?, ?, ?, ?)",
-            [("rue du test", "Champs-Sur-Marne", 1.21, 2.35), ("rue de l'esiee", "Champs-Sur-Marne", 1.00, 2.00)]
+            [
+                ("rue du test", "Champs-Sur-Marne", 1.21, 2.35),
+                ("rue de l'esiee", "Champs-Sur-Marne", 1.00, 2.00),
+            ],
         )
     conn.commit()
     conn.close()
@@ -330,7 +340,6 @@ class DataPayload(BaseModel):
     value: str
 
 
-@app.on_event("startup")
 def startup_event() -> None:
     init_slot_table(DB_PATH)
     init_vehicule_table(DB_PATH)
