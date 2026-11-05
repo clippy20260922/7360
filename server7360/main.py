@@ -7,9 +7,16 @@ from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import json
+import math
+from datetime import datetime, timedelta, timezone
 
-DB_PATH = Path("/data/la-base.db")
-USER_DB_PATH = Path("/data/database-user.db")
+# Dossier des bases de données : /data par défaut (conteneur), modifiable pour
+# lancer le serveur directement sur le PC : DATA_DIR=./data uvicorn main:app
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+DB_PATH = DATA_DIR / "la-base.db"
+USER_DB_PATH = DATA_DIR / "database-user.db"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -41,6 +48,29 @@ class User():
         self.type = "user"
         self.vehicule = None
 current_user = User()
+
+### Petits outils communs
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+def ts(dt: datetime) -> str:
+    #Format des timestamps de la base : yyyy-mm-dd hh:mm:ss (UTC)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def ensure_columns(conn: sqlite3.Connection, table: str, columns: dict) -> None:
+    #Ajoute les colonnes manquantes (pour les bases créées avant cette version)
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(" + table + ")")}
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute("ALTER TABLE " + table + " ADD COLUMN " + name + " " + definition)
+
+def require_agent() -> None:
+    #Vérifie l'authentification puis que l'utilisateur est un agent
+    if current_user.username=="":
+        raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
+    if current_user.type != "agent":
+        raise HTTPException(status_code=403, detail="Accès réservé aux agents")
 
 ### Fonction d'initilisation de la table des places de parking dans la database principale
 
@@ -87,14 +117,15 @@ def init_parking_table(DB_PATH: Path) -> None:
         " parking_lat float NOT NULL,"\
         " parking_long float NOT NULL)"
     )
+    #Position sur le plan (en mètres) : sert à dessiner le parking sur la carte
+    ensure_columns(conn, "parking_table", {"parking_x": "float", "parking_y": "float"})
     row = conn.execute("SELECT parking_name FROM parking_table").fetchone()
     if row is None:
         conn.executemany(
-            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long) VALUES (?, ?, ?, ?)",
-            [
-                ("Le Parking", "1 rue du test, Champs-Sur-Marne", 1.22, 2.35),
-                ("L'autre parking", "7 rue du test, Champs-Sur-Marne", 1.02, 2.01),
-            ],
+            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long, parking_x, parking_y) "\
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [("Le Parking", "1 rue du test, Champs-Sur-Marne", 1.22, 2.35, 42, -22),
+             ("L'autre parking", "7 rue du test, Champs-Sur-Marne", 1.02, 2.01, -45, 25)]
         )
     conn.commit()
     conn.close()
@@ -117,18 +148,33 @@ def init_slot_table(DB_PATH: Path) -> None:
         " slot_occupied boolean DEFAULT false,"\
         " fin_occupation timestamp NOT NULL DEFAULT '1900-01-01 00:00:00')"
     )
+    #Position sur le plan (en mètres, pas en GPS) et orientation de la place
+    ensure_columns(conn, "slot_table", {"slot_x": "float", "slot_y": "float", "slot_angle": "float DEFAULT 0"})
     row = conn.execute("SELECT slot_id FROM slot_table WHERE slot_id = 1").fetchone()
     if row is None:
-        conn.execute(
-            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, slot_tarif) "\
-            "VALUES (1, 1.22, 2.33, 'voit', false, false, false, 0.0), (2, 1.22, 2.35, 'voit', false, false, false, 0.0),"\
-            "(3, 1.23, 2.37, 'voit', false, true, true, 0.0), (4, 1.46, 2.12, 'voit', true, false, false, 0.0),"\
-            "(5, 2.22, 0.66, 'voit', true, false, true, 0.0), (6, 1.25, 2.43, 'moto', false, false, false, 0.0),"\
-            "(7, 1.28, 2.29, 'voit', false, false, true, 0.0)"
-        )
-        conn.execute(
-            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, parking, fin_occupation, slot_tarif) "\
-            "VALUES (8, 2.00, 2.30, 'voit', false, false, false, 'Le Parking', '1900-01-01 00:00:00', 0.0), (9, 2.00, 2.3, 'voit', true, false, false, 'Le Parking', '2026-10-20 00:00:00', 0.0)"
+        libre = "1900-01-01 00:00:00"
+        dans_90_min = ts(utc_now() + timedelta(minutes=90))
+        depuis_45_min = ts(utc_now() - timedelta(minutes=45))
+        depuis_3h = ts(utc_now() - timedelta(minutes=190))
+        rue = ("rue du test", "Champs-Sur-Marne")
+        lot = ("1 rue du test", "Champs-Sur-Marne")
+        # id, adresse, ville, lat, long, type, pmr, elec, parking, tarif, occupée, fin d'occupation, x, y
+        places = [
+            (1, *rue, 1.22, 2.33, "voit", False, False, None, 1.6, False, libre, -30.0, -6.0),
+            (2, *rue, 1.22, 2.35, "voit", False, False, None, 1.6, False, libre, -27.3, -6.0),
+            (3, *rue, 1.23, 2.37, "voit", True, True, None, 1.6, False, libre, -24.6, -6.0),
+            (4, *rue, 1.46, 2.12, "voit", False, False, None, 1.6, True, libre, -30.0, 6.0),          #occupée, rien de payé
+            (5, *rue, 2.22, 0.66, "voit", False, True, None, 1.6, True, dans_90_min, -27.3, 6.0),     #occupée, en règle
+            (6, *rue, 1.25, 2.43, "moto", False, False, None, 0.8, True, depuis_45_min, -20.0, 6.0),  #occupée, dépassement
+            (7, *rue, 1.28, 2.29, "voit", False, True, None, 1.6, False, libre, -16.0, -6.0),
+            (8, *lot, 2.00, 2.30, "voit", False, False, "Le Parking", 2.0, False, libre, 20.0, 6.0),
+            (9, *lot, 2.00, 2.30, "voit", False, False, "Le Parking", 2.0, True, depuis_3h, 23.0, 6.0), #occupée, dépassement
+        ]
+        conn.executemany(
+            "INSERT INTO slot_table (slot_id, slot_adresse, slot_ville, slot_lat, slot_long, slot_type, slot_pmr, slot_elec, "\
+            "parking, slot_tarif, slot_occupied, fin_occupation, slot_x, slot_y) "\
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            places
         )
     conn.commit()
     conn.close()
@@ -138,19 +184,25 @@ def init_slot_table(DB_PATH: Path) -> None:
 def init_vehicule_table(DB_PATH: Path) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DROP TABLE IF EXISTS vehicle_table")
+    # current_slot : place où le véhicule est garé en ce moment (NULL sinon)
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS user_table ("\
+        "CREATE TABLE IF NOT EXISTS vehicle_table ("\
                 " no_plaque char[9] PRIMARY KEY,"\
-                " proprietaire char[10] NOT NULL,"\
-                " type_vehicule float NOT NULL,"\
-                " elec boolean)"
+                " proprietaire char[30] NOT NULL,"\
+                " type_vehicule char[4] NOT NULL,"\
+                " elec boolean DEFAULT false,"\
+                " current_slot INTEGER DEFAULT NULL)"
     )
-    row = conn.execute("SELECT no_plaque FROM user_table").fetchone()
+    ensure_columns(conn, "vehicle_table", {"current_slot": "INTEGER DEFAULT NULL"})
+    row = conn.execute("SELECT no_plaque FROM vehicle_table").fetchone()
     if row is None:
-        conn.execute (
-            "INSERT INTO user_table (no_plaque, proprietaire, type_vehicule, elec)"\
-            "VALUES ('AB123CD', 'ab123456','voit', false)"
+        conn.executemany(
+            "INSERT INTO vehicle_table (no_plaque, proprietaire, type_vehicule, elec, current_slot) VALUES (?, ?, ?, ?, ?)",
+            [("AB123CD", "ab123456", "voit", False, 4),
+             ("EF456GH", "cd789", "voit", True, 5),
+             ("MN012OP", "cd789", "moto", False, 6),
+             ("IJ789KL", "ab123456", "voit", False, 9),
+             ("QR345ST", "ab123456", "voit", False, None)]
         )
     conn.commit()
     conn.close()
@@ -172,13 +224,114 @@ def init_user_table(DB_PATH: Path) -> None:
     )
     row = conn.execute("SELECT * FROM user_table").fetchone()
     if row is None:
+        conn.execute(
+            "INSERT INTO user_table (username, password, nom, prenom, type)"\
+            " VALUES ('ab123456', 'Mon_mdp123', 'Dupont', 'Alice', 'user'), ('cd789', 'autre_MDP666', 'Martin', 'Bruno', 'user'),"\
+            " ('OSS117', 'Lablanquette117', 'Bonisseur de La Bath', 'Hubert', 'agent')"
+        )
+    conn.commit()
+    conn.close()
+
+### Infractions que l'agent peut sanctionner (montants forfaitaires du Code de la route)
+
+def init_infraction_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS offense_table ("\
+        " code char[20] PRIMARY KEY,"\
+        " label char[60] NOT NULL,"\
+        " amount float NOT NULL,"\
+        " legal char[60] NOT NULL,"\
+        " majorated float DEFAULT NULL)"
+    )
+    row = conn.execute("SELECT code FROM offense_table").fetchone()
+    if row is None:
+        #Le forfait post-stationnement (FPS) est fixé par chaque commune (environ 10 à 50 €) : à adapter
         conn.executemany(
-            "INSERT INTO user_table (username, password, nom, prenom, type) VALUES (?, ?, ?, ?, ?)",
-            [
-                ("ab123456", "Mon_mdp123", "", "", "user"),
-                ("cd789", "autre_MDP666", "", "", "user"),
-                ("OSS117", "Lablanquette117", "", "", "agent"),
-            ],
+            "INSERT INTO offense_table (code, label, amount, legal, majorated) VALUES (?, ?, ?, ?, ?)",
+            [("overtime", "Dépassement de la durée payée", 35, "Forfait post-stationnement (FPS)", None),
+             ("unpaid", "Absence de paiement", 35, "Forfait post-stationnement (FPS)", None),
+             ("nuisance", "Stationnement gênant", 35, "Contravention de 2e classe", 75),
+             ("abusive", "Stationnement abusif (plus de 7 jours)", 35, "Contravention de 2e classe", 75),
+             ("veryNuisance", "Stationnement très gênant", 135, "Contravention de 4e classe", 375),
+             ("pmr", "Place PMR sans carte", 135, "Contravention de 4e classe (très gênant)", 375)]
+        )
+    conn.commit()
+    conn.close()
+
+### Contraventions dressées par les agents
+
+def init_fine_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    #Le numéro affiché (PV-2026-00001) est fabriqué à partir de fine_no et de l'année d'émission
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS fine_table ("\
+        " fine_no INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " no_plaque char[9] NOT NULL,"\
+        " type_vehicule char[4] NOT NULL,"\
+        " slot_id INTEGER NOT NULL,"\
+        " lieu char[100],"\
+        " agent char[30] NOT NULL,"\
+        " offense char[20] NOT NULL,"\
+        " amount float NOT NULL,"\
+        " commentaire char[300],"\
+        " date_emission timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+    )
+    conn.commit()
+    conn.close()
+
+### Plan de la carte : routes, bâtiments et zones (en mètres, comme la position des places)
+
+def init_plan_tables(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plan_road_table ("\
+        " road_id INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " road_name char[50],"\
+        " ax float NOT NULL, ay float NOT NULL,"\
+        " bx float NOT NULL, by float NOT NULL,"\
+        " width float NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plan_building_table ("\
+        " building_id INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " footprint text NOT NULL,"\
+        " height float NOT NULL,"\
+        " color integer DEFAULT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plan_zone_table ("\
+        " zone_id INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " kind char[5] NOT NULL,"\
+        " polygon text NOT NULL)"
+    )
+
+    def rect(x0, y0, x1, y1) -> str:
+        return json.dumps([{"x": x0, "y": y0}, {"x": x1, "y": y0}, {"x": x1, "y": y1}, {"x": x0, "y": y1}])
+
+    if conn.execute("SELECT road_id FROM plan_road_table").fetchone() is None:
+        conn.executemany(
+            "INSERT INTO plan_road_table (road_name, ax, ay, bx, by, width) VALUES (?, ?, ?, ?, ?, ?)",
+            [("Rue du test", -85, 0, 85, 0, 7),
+             ("Rue de l'ESIEE", 0, -55, 0, 55, 6),
+             ("Avenue du parking", 60, -55, 60, 55, 6),
+             ("Rue du parc", -85, 42, 85, 42, 6)]
+        )
+    if conn.execute("SELECT building_id FROM plan_building_table").fetchone() is None:
+        conn.executemany(
+            "INSERT INTO plan_building_table (footprint, height, color) VALUES (?, ?, ?)",
+            [(rect(-70, -32, -45, -12), 14, 0xFFB0BEC5), (rect(-35, -38, -10, -14), 10, 0xFFCFD8DC),
+             (rect(8, -40, 28, -14), 16, 0xFFB0BEC5), (rect(68, -40, 82, -12), 12, 0xFFCFD8DC),
+             (rect(-82, 10, -60, 34), 12, 0xFFCFD8DC), (rect(-30, 12, -8, 36), 9, 0xFFB0BEC5),
+             (rect(8, 12, 28, 36), 14, 0xFFCFD8DC), (rect(68, 10, 82, 36), 18, 0xFFB0BEC5)]
+        )
+    if conn.execute("SELECT zone_id FROM plan_zone_table").fetchone() is None:
+        conn.executemany(
+            "INSERT INTO plan_zone_table (kind, polygon) VALUES (?, ?)",
+            [("park", rect(32, 12, 54, 38)), ("water", rect(38, 20, 48, 30))]
         )
     conn.commit()
     conn.close()
@@ -193,6 +346,9 @@ def startup_event() -> None:
     init_parking_table(DB_PATH)
     init_rue_table(DB_PATH)
     init_batiment_table(DB_PATH)
+    init_plan_tables(DB_PATH)
+    init_infraction_table(DB_PATH)
+    init_fine_table(DB_PATH)
     init_user_table(USER_DB_PATH)
     
     
@@ -316,14 +472,14 @@ def get_moto_free() -> dict :
 
 ### Info d'une place
     
-@app.get("/data/{id}")
-def get_data(id) -> dict : 
+@app.get("/data/{id:int}")
+def get_data(id:int) -> dict : 
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,))
+    row = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
     conn.close()
     if row is None : 
-        return {"Pas de place avec cet identifiant : ", id}
-    return {"Place ", id, " : ", row[0]}
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+    return {"data":row}
 
 
 
@@ -453,6 +609,205 @@ def get_overtime_slot(parking) -> dict:
 
 
 
+########## Plan de la carte ##########
+
+
+### Plan complet : places, parkings, routes, bâtiments et zones (format attendu par ParkingMapView)
+
+LOT_WIDTH = 24.0
+LOT_LENGTH = 14.0
+
+def position_plan(x, y, lat, long, ref_lat, ref_long) -> tuple:
+    #Position en mètres. Si elle n'est pas renseignée en base, on la déduit de la latitude/longitude
+    if x is not None and y is not None:
+        return float(x), float(y)
+    return ((long - ref_long) * 111320 * math.cos(math.radians(ref_lat)), -(lat - ref_lat) * 110540)
+
+@app.get("/parking")
+def get_parking() -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    slots = conn.execute("SELECT * FROM slot_table ORDER BY slot_id").fetchall()
+    lots = conn.execute("SELECT * FROM parking_table").fetchall()
+    roads = conn.execute("SELECT * FROM plan_road_table").fetchall()
+    buildings = conn.execute("SELECT * FROM plan_building_table").fetchall()
+    zones = conn.execute("SELECT * FROM plan_zone_table").fetchall()
+    conn.close()
+
+    ref_lat = sum(r["slot_lat"] for r in slots) / len(slots) if slots else 0.0
+    ref_long = sum(r["slot_long"] for r in slots) / len(slots) if slots else 0.0
+
+    spots = []
+    for r in slots:
+        x, y = position_plan(r["slot_x"], r["slot_y"], r["slot_lat"], r["slot_long"], ref_lat, ref_long)
+        moto = r["slot_type"] == "moto"
+        spots.append({
+            "id": str(r["slot_id"]),
+            "x": x, "y": y,
+            "width": 1.2 if moto else 2.5,
+            "length": 2.4 if moto else 5.0,
+            "angle": r["slot_angle"] or 0,
+            "status": "occupied" if r["slot_occupied"] else "free",
+        })
+
+    for lot in lots:
+        x, y = position_plan(lot["parking_x"], lot["parking_y"], lot["parking_lat"], lot["parking_long"], ref_lat, ref_long)
+        places = [r for r in slots if r["parking"] == lot["parking_name"]]
+        #Un parking est complet quand toutes ses places sont occupées
+        complet = len(places) > 0 and all(r["slot_occupied"] for r in places)
+        spots.append({
+            "id": lot["parking_name"],
+            "x": x, "y": y,
+            "width": LOT_WIDTH, "length": LOT_LENGTH, "angle": 0,
+            "status": "occupied" if complet else "free",
+            "lot": True,
+        })
+
+    return {
+        "spots": spots,
+        "roads": [{"ax": r["ax"], "ay": r["ay"], "bx": r["bx"], "by": r["by"], "width": r["width"], "name": r["road_name"] or ""} for r in roads],
+        "buildings": [{"footprint": json.loads(r["footprint"]), "height": r["height"], "color": r["color"]} for r in buildings],
+        "zones": [{"kind": r["kind"], "polygon": json.loads(r["polygon"])} for r in zones],
+    }
+
+
+
+########## Espace agent ##########
+
+
+### Places avec le véhicule garé dessus (réservé aux agents)
+
+@app.get("/agent/slots")
+def get_agent_slots() -> dict:
+    require_agent()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT slot_table.*, vehicle_table.no_plaque AS plaque, vehicle_table.proprietaire AS proprietaire "\
+        "FROM slot_table LEFT JOIN vehicle_table ON vehicle_table.current_slot = slot_table.slot_id "\
+        "ORDER BY slot_table.slot_id"
+    ).fetchall()
+    conn.close()
+    data = [{
+        "id": r["slot_id"],
+        "type": r["slot_type"],
+        "pmr": bool(r["slot_pmr"]),
+        "elec": bool(r["slot_elec"]),
+        "address": r["slot_adresse"],
+        "city": r["slot_ville"],
+        "parking": r["parking"],
+        "tariff": r["slot_tarif"],
+        "occupied": bool(r["slot_occupied"]),
+        "fin_occupation": r["fin_occupation"],
+        "plate": r["plaque"],
+        "owner": r["proprietaire"],
+    } for r in rows]
+    #"now" : l'heure du serveur (UTC), pour que le client juge les dépassements avec la même horloge
+    return {"now": ts(utc_now()), "N": len(data), "data": data}
+
+
+### Infractions proposées pour une contravention, avec leur montant
+
+@app.get("/agent/infractions")
+def get_agent_infractions() -> dict:
+    require_agent()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT code, label, amount, legal, majorated FROM offense_table").fetchall()
+    conn.close()
+    data = [{"code": r[0], "label": r[1], "amount": r[2], "legal": r[3], "majorated": r[4]} for r in rows]
+    return {"N": len(data), "data": data}
+
+
+### Contraventions
+
+def fine_to_dict(r: sqlite3.Row) -> dict:
+    return {
+        "id": "PV-" + str(r["date_emission"])[:4] + "-" + str(r["fine_no"]).zfill(5),
+        "plate": r["no_plaque"],
+        "vehicle_type": r["type_vehicule"],
+        "slot_id": r["slot_id"],
+        "location": r["lieu"] or "",
+        "agent": r["agent"],
+        "offense": r["offense"],
+        "offense_label": r["label"] or r["offense"],
+        "amount": r["amount"],
+        "comment": r["commentaire"],
+        "issued_at": r["date_emission"],
+    }
+
+@app.get("/agent/fines")
+def get_agent_fines(mine: bool = False) -> dict:
+    require_agent()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    requete = "SELECT fine_table.*, offense_table.label AS label FROM fine_table "\
+              "LEFT JOIN offense_table ON offense_table.code = fine_table.offense"
+    if mine:
+        rows = conn.execute(requete + " WHERE agent = ? ORDER BY fine_no DESC", (current_user.username,)).fetchall()
+    else:
+        rows = conn.execute(requete + " ORDER BY fine_no DESC").fetchall()
+    conn.close()
+    data = [fine_to_dict(r) for r in rows]
+    return {"N": len(data), "data": data}
+
+class FinePayload(BaseModel):
+    slot_id: int
+    offense: str
+    plate: str | None = None      #si absent, on prend le véhicule garé sur la place
+    comment: str | None = None
+
+@app.post("/agent/fines")
+def create_agent_fine(payload: FinePayload) -> dict:
+    require_agent()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    slot = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (payload.slot_id,)).fetchone()
+    if slot is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+    if not slot["slot_occupied"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Aucun véhicule n'est stationné sur cette place")
+
+    offense = conn.execute("SELECT * FROM offense_table WHERE code = ?", (payload.offense,)).fetchone()
+    if offense is None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Infraction inconnue")
+
+    #Infos du véhicule : celui enregistré sur la place, sinon ce que l'agent a saisi
+    vehicle = conn.execute("SELECT no_plaque, type_vehicule FROM vehicle_table WHERE current_slot = ?", (payload.slot_id,)).fetchone()
+    plate = (payload.plate or "").strip().upper()
+    if plate == "" and vehicle is not None:
+        plate = vehicle["no_plaque"]
+    if plate == "":
+        conn.close()
+        raise HTTPException(status_code=400, detail="Veuillez renseigner la plaque du véhicule")
+    vehicle_type = vehicle["type_vehicule"] if vehicle is not None else slot["slot_type"]
+
+    #Une seule contravention par place sur 12 h
+    doublon = conn.execute("SELECT fine_no FROM fine_table WHERE slot_id = ? AND date_emission > ?", (payload.slot_id, ts(utc_now() - timedelta(hours=12)))).fetchone()
+    if doublon is not None:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Une contravention a déjà été dressée pour cette place")
+
+    lieu = ", ".join(x for x in (slot["slot_adresse"], slot["slot_ville"]) if x) or (slot["parking"] or "")
+    comment = (payload.comment or "").strip() or None
+    cur = conn.execute(
+        "INSERT INTO fine_table (no_plaque, type_vehicule, slot_id, lieu, agent, offense, amount, commentaire, date_emission) "\
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (plate, vehicle_type, payload.slot_id, lieu, current_user.username, offense["code"], offense["amount"], comment, ts(utc_now()))
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT fine_table.*, offense_table.label AS label FROM fine_table "\
+        "LEFT JOIN offense_table ON offense_table.code = fine_table.offense WHERE fine_no = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return {"data": fine_to_dict(row)}
+
+
+
 ########## Login ##########
 
 ### Login
@@ -476,4 +831,4 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
      if hashed_mdp != hashed_intput:
          raise HTTPException(status_code=400, detail="username ou mot de passe erroné")
      set_user_info(form_data.username)
-     return {"username":data[0]}
+     return {"username":data[0], "type":current_user.type}
