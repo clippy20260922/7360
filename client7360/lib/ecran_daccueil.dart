@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'chercher_un_parking.dart';
 import 'page_agent.dart';
-import 'paramètres_page.dart';
+import 'parametres_page.dart';
 
 class EcranDAccueil extends StatelessWidget {
   const EcranDAccueil({super.key});
