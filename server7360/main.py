@@ -1,7 +1,8 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import HTTPException, Query, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Annotated
+from typing import Annotated, AsyncIterator
 from pydantic import BaseModel
 import sqlite3
 from pathlib import Path
@@ -10,7 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 DB_PATH = Path("/data/la-base.db")
 USER_DB_PATH = Path("/data/database-user.db")
 
-app = FastAPI(title="Simple SQLite API")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_event()
+    yield
+
+
+app = FastAPI(title="Simple SQLite API", lifespan=lifespan)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -60,9 +67,12 @@ def init_rue_table(DB_PATH: Path) -> None:
     )
     row = conn.execute("SELECT rue_name FROM rue_table").fetchone()
     if row is None:
-        conn.execute(
-            "INSERT INTO rue_table (rue_name, rue_ville, rue_lat, float) "\
-            "VALUES ('rue du test', Champs-Sur-Marne', 1.21, 2.35), ('rue de l'esiee','Champs-Sur-Marne', 1.00, 2.00)"
+        conn.executemany(
+            "INSERT INTO rue_table (rue_name, rue_ville, rue_lat, rue_long) VALUES (?, ?, ?, ?)",
+            [
+                ("rue du test", "Champs-Sur-Marne", 1.21, 2.35),
+                ("rue de l'esiee", "Champs-Sur-Marne", 1.00, 2.00),
+            ],
         )
     conn.commit()
     conn.close()
@@ -79,9 +89,12 @@ def init_parking_table(DB_PATH: Path) -> None:
     )
     row = conn.execute("SELECT parking_name FROM parking_table").fetchone()
     if row is None:
-        conn.execute(
-            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long) "\
-            "VALUES ('Le Parking', '1 rue du test, Champs-Sur-Marne', 1.22, 2.35), ('L'autre parking', '7 rue du test, Champs-Sur-Marne', 1.02, 2.01)"
+        conn.executemany(
+            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long) VALUES (?, ?, ?, ?)",
+            [
+                ("Le Parking", "1 rue du test, Champs-Sur-Marne", 1.22, 2.35),
+                ("L'autre parking", "7 rue du test, Champs-Sur-Marne", 1.02, 2.01),
+            ],
         )
     conn.commit()
     conn.close()
@@ -107,15 +120,15 @@ def init_slot_table(DB_PATH: Path) -> None:
     row = conn.execute("SELECT slot_id FROM slot_table WHERE slot_id = 1").fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec) "\
-            "VALUES (1, 1.22, 2.33, 'voit', false, false, false), (2, 1.22, 2.35, 'voit', false, false, false),"\
-            "(3, 1.23, 2.37, 'voit', false, true, true), (4, 1.46, 2.12, 'voit', true, false, false),"\
-            "(5, 2.22, 0.66, 'voit', true, false, true), (6, 1.25, 2.43, 'moto', false, false, false),"\
-            "(7, 1.28, 2.29, 'voit', false, false, true)"
+            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, slot_tarif) "\
+            "VALUES (1, 1.22, 2.33, 'voit', false, false, false, 0.0), (2, 1.22, 2.35, 'voit', false, false, false, 0.0),"\
+            "(3, 1.23, 2.37, 'voit', false, true, true, 0.0), (4, 1.46, 2.12, 'voit', true, false, false, 0.0),"\
+            "(5, 2.22, 0.66, 'voit', true, false, true, 0.0), (6, 1.25, 2.43, 'moto', false, false, false, 0.0),"\
+            "(7, 1.28, 2.29, 'voit', false, false, true, 0.0)"
         )
         conn.execute(
-            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, parking, fin_occupation) "\
-            "VALUES (8, 2.00, 2.30, 'voit', false, false, false, 'Le Parking', '1900-01-01 00:00:00'), (9, 2.00, 2.3, 'voit', true, false, false, 'Le Parking', '2026-10-20 00:00:00')"
+            "INSERT INTO slot_table (slot_id, slot_lat, slot_long, slot_type, slot_occupied, slot_pmr, slot_elec, parking, fin_occupation, slot_tarif) "\
+            "VALUES (8, 2.00, 2.30, 'voit', false, false, false, 'Le Parking', '1900-01-01 00:00:00', 0.0), (9, 2.00, 2.3, 'voit', true, false, false, 'Le Parking', '2026-10-20 00:00:00', 0.0)"
         )
     conn.commit()
     conn.close()
@@ -159,10 +172,13 @@ def init_user_table(DB_PATH: Path) -> None:
     )
     row = conn.execute("SELECT * FROM user_table").fetchone()
     if row is None:
-        conn.execute(
-            "INSERT INTO user_table (username, password, type)"\
-            " VALUES ('ab123456', 'Mon_mdp123', 'user'), ('cd789', 'autre_MDP666', 'user'),"\
-            " ('OSS117', 'Lablanquette117', 'agent')"
+        conn.executemany(
+            "INSERT INTO user_table (username, password, nom, prenom, type) VALUES (?, ?, ?, ?, ?)",
+            [
+                ("ab123456", "Mon_mdp123", "", "", "user"),
+                ("cd789", "autre_MDP666", "", "", "user"),
+                ("OSS117", "Lablanquette117", "", "", "agent"),
+            ],
         )
     conn.commit()
     conn.close()
@@ -171,7 +187,6 @@ class DataPayload(BaseModel):
     value: str
 
 
-@app.on_event("startup")
 def startup_event() -> None:
     init_slot_table(DB_PATH)
     init_vehicule_table(DB_PATH)
