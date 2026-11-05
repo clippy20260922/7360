@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'agent_fine_sheet.dart';
 import 'agent_models.dart';
 import 'agent_service.dart';
 import 'agent_theme.dart';
@@ -19,6 +20,7 @@ class AgentViolationsTab extends StatefulWidget {
 
 class _AgentViolationsTabState extends State<AgentViolationsTab> {
   _Filter _filter = _Filter.all;
+  final Set<String> _open = {};
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +66,15 @@ class _AgentViolationsTabState extends State<AgentViolationsTab> {
                 for (final s in shown)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _ViolationCard(info: s, now: now),
+                    child: _ViolationCard(
+                      info: s,
+                      now: now,
+                      controller: widget.controller,
+                      expanded: _open.contains(s.id),
+                      onToggle: () => setState(() {
+                        if (!_open.remove(s.id)) _open.add(s.id);
+                      }),
+                    ),
                   ),
             ],
           ),
@@ -190,17 +200,31 @@ class _EmptyState extends StatelessWidget {
 // ───────────────────────── Carte d'une infraction ─────────────────────────
 
 class _ViolationCard extends StatelessWidget {
-  const _ViolationCard({required this.info, required this.now});
+  const _ViolationCard({
+    required this.info,
+    required this.now,
+    required this.controller,
+    required this.expanded,
+    required this.onToggle,
+  });
 
   final SlotInfo info;
   final DateTime now;
+  final AgentController controller;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final c = info.complianceAt(now);
     final overdue = info.overtimeAt(now);
 
-    return AgentCard(
+    final fined = controller.recentFineFor(info.id) != null;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onToggle,
+      child: AgentCard(
       accent: c.color,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,6 +239,12 @@ class _ViolationCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               ComplianceBadge(c),
+              Icon(
+                expanded
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
+                color: AgentColors.muted,
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -280,10 +310,24 @@ class _ViolationCard extends StatelessWidget {
               if (info.simulated)
                 const Tag(Icons.science_outlined, 'Simulé',
                     color: AgentColors.warn),
+              if (fined)
+                const Tag(Icons.task_alt_rounded, 'Contravention dressée',
+                    color: AgentColors.ok),
             ],
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            alignment: Alignment.topCenter,
+            child: expanded
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: FineButton(controller: controller, info: info),
+                  )
+                : const SizedBox(width: double.infinity),
           ),
         ],
       ),
+    ),
     );
   }
 }

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../parking_map_page.dart' show ParkingService, buildDemoParkingData;
 import '../parking_map_view.dart';
+import 'agent_fines.dart';
 import 'agent_models.dart';
 
 // ───────────────────────── Connexion ─────────────────────────
@@ -316,9 +317,60 @@ class AgentService {
 // ───────────────────────── Contrôleur partagé par les onglets ─────────────────────────
 
 class AgentController extends ChangeNotifier {
+  AgentController({this.agentId = 'agent'}) {
+    fines.addAll(buildDemoFines(DateTime.now().toUtc()));
+  }
+
+  /// Identifiant de l'agent connecté (inscrit sur chaque contravention).
+  final String agentId;
+
   AgentSnapshot? snapshot;
   bool loading = true;
   final List<double> occupancyHistory = [];
+
+  /// Contraventions, les plus récentes d'abord. Pour l'instant en mémoire
+  /// (démo) : à remplacer par un appel à l'API / la base de données.
+  final List<Fine> fines = [];
+  int _nextFineNumber = 1042;
+
+  /// Contravention récente (moins de 12 h) déjà dressée pour cette place.
+  Fine? recentFineFor(String slotId) {
+    final now = DateTime.now().toUtc();
+    for (final f in fines) {
+      if (!f.simulated &&
+          f.slotId == slotId &&
+          now.difference(f.issuedAt) < const Duration(hours: 12)) {
+        return f;
+      }
+    }
+    return null;
+  }
+
+  /// Dresse une contravention. TODO : POST vers le serveur quand la route
+  /// existera ; pour l'instant elle est seulement ajoutée à la liste locale.
+  Fine issueFine({
+    required SlotInfo info,
+    required Offense offense,
+    required String plate,
+    String? comment,
+  }) {
+    final now = DateTime.now().toUtc();
+    final fine = Fine(
+      id: 'PV-${now.year}-${(_nextFineNumber++).toString().padLeft(5, '0')}',
+      plate: plate,
+      vehicleType: info.type,
+      slotId: info.id,
+      location: info.location,
+      agentId: agentId,
+      offense: offense,
+      amount: offense.amount,
+      issuedAt: now,
+      comment: comment,
+    );
+    fines.insert(0, fine);
+    notifyListeners();
+    return fine;
+  }
 
   Timer? _timer;
   bool _busy = false;

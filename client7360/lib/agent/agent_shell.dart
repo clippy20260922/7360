@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'agent_fines_tab.dart';
 import 'agent_map_tab.dart';
 import 'agent_service.dart';
 import 'agent_stats_tab.dart';
@@ -18,10 +19,16 @@ class AgentShell extends StatefulWidget {
 }
 
 class _AgentShellState extends State<AgentShell> {
-  final AgentController _controller = AgentController();
+  late final AgentController _controller =
+      AgentController(agentId: widget.agentName);
   int _index = 0;
 
-  static const _titles = ['Carte', 'Stationnements problématiques', 'Statistiques'];
+  static const _titles = [
+    'Carte',
+    'Stationnements problématiques',
+    'Statistiques',
+    'Contraventions',
+  ];
 
   @override
   void initState() {
@@ -118,6 +125,7 @@ class _AgentShellState extends State<AgentShell> {
                   AgentMapTab(controller: _controller),
                   AgentViolationsTab(controller: _controller),
                   AgentStatsTab(controller: _controller),
+                  AgentFinesTab(controller: _controller),
                 ],
               ),
             ),
@@ -147,12 +155,17 @@ class _AgentShellState extends State<AgentShell> {
                     label: Text('$n'),
                     child: const Icon(Icons.warning_rounded),
                   ),
-                  label: 'Problématiques',
+                  label: 'Infractions',
                 ),
                 const NavigationDestination(
                   icon: Icon(Icons.insights_outlined),
                   selectedIcon: Icon(Icons.insights_rounded),
                   label: 'Stats',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.receipt_long_outlined),
+                  selectedIcon: Icon(Icons.receipt_long_rounded),
+                  label: 'Amendes',
                 ),
               ],
             );

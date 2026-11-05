@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../parking_map_view.dart';
+import 'agent_fine_sheet.dart';
 import 'agent_models.dart';
 import 'agent_service.dart';
 import 'agent_theme.dart';
@@ -61,6 +62,7 @@ class _AgentMapTabState extends State<AgentMapTab> {
                   child: selected == null
                       ? const _EmptyPanel()
                       : _SpotPanel(
+                          controller: widget.controller,
                           spot: selected,
                           info: snap.slotById(selected.id),
                           now: snap.fetchedAt,
@@ -250,8 +252,14 @@ class _EmptyPanel extends StatelessWidget {
 }
 
 class _SpotPanel extends StatelessWidget {
-  const _SpotPanel({required this.spot, required this.info, required this.now});
+  const _SpotPanel({
+    required this.controller,
+    required this.spot,
+    required this.info,
+    required this.now,
+  });
 
+  final AgentController controller;
   final ParkingSpot spot;
   final SlotInfo? info;
   final DateTime now;
@@ -395,6 +403,10 @@ class _SpotPanel extends StatelessWidget {
           ],
         ),
       ),
+      if (i != null && compliance.isViolation) ...[
+        const SizedBox(height: 12),
+        FineButton(controller: controller, info: i),
+      ],
       if (i != null) ...[
         const SizedBox(height: 16),
         const SectionLabel('Place'),
