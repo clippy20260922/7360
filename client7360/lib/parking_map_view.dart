@@ -40,6 +40,11 @@ class ParkingSpot {
   final Offset center;
   final double width, length, angle;
   SpotStatus status;
+  String get vehicleType {
+  if (isLot) return 'Parking';
+  if (width <= 1.5) return 'Moto';
+  return 'Voiture';
+  }
 
   /// true = parking (grande surface, affichée en bleu), false = place simple.
   final bool isLot;

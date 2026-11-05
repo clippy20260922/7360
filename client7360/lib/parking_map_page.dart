@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'parking_map_view.dart';
+import 'informations_vehicule_page.dart';
+import 'reservations_locales.dart';
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -324,6 +326,11 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
   /// Id de la place sélectionnée (null si aucune).
   String? _selectedId;
 
+  // Réservations locales pour les essais sur la carte de démonstration.
+  static final Set<String> _demoOccupiedIds = {};
+  
+  bool _usingDemoData = false;
+
   ParkingSpot? get _selectedSpot {
     for (final s in _data.spots) {
       if (s.id == _selectedId) return s;
@@ -335,7 +342,10 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
   void initState() {
     super.initState();
     _load();
-    _timer = Timer.periodic(_refreshEvery, (_) => _load());
+    _timer = Timer.periodic(_refreshEvery, (_) {
+      _actualiserPlacesLiberees();
+      _load();
+    });
   }
 
   @override
@@ -344,6 +354,19 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
     super.dispose();
   }
 
+
+  void _actualiserPlacesLiberees() {
+    if (!_usingDemoData) return;
+
+    setState(() {
+      for (final spot in _data.spots) {
+        if (ReservationsLocales.estLiberee(spot.id)) {
+          spot.status = SpotStatus.free;
+          _demoOccupiedIds.remove(spot.id);
+        }
+      }
+    });
+  }
   Future<void> _load() async {
     if (_fetching) return;
     _fetching = true;
@@ -356,7 +379,18 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
           data.roads.isEmpty &&
           data.buildings.isEmpty;
       setState(() {
+        _usingDemoData = isEmpty;
         _data = isEmpty ? _demoData : data;
+        if (_usingDemoData) {
+          for (final spot in _data.spots) {
+            if (ReservationsLocales.estLiberee(spot.id)) {
+              spot.status = SpotStatus.free;
+              _demoOccupiedIds.remove(spot.id);
+            } else if (_demoOccupiedIds.contains(spot.id)) {
+              spot.status = SpotStatus.occupied;
+            }
+          }
+        }
         _error = null;
         _loading = false;
       });
@@ -369,6 +403,7 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
             _data.roads.isEmpty &&
             _data.buildings.isEmpty) {
           _data = _demoData;
+          _usingDemoData = true;
         }
         _error = e.toString();
         _loading = false;
@@ -379,17 +414,49 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
   }
 
   Future<void> _reserveSelected() async {
-    final id = _selectedId;
-    if (id == null) return;
-    try {
-      await ParkingService.reserve(id);
-      _controller.clearSelection();
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+    final spot = _selectedSpot;
+
+    if (spot == null ||
+        spot.isLot ||
+        spot.status != SpotStatus.free) {
+      return;
     }
+
+    final informations = await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => InformationsVehiculePage(
+          placeId: spot.id,
+          typePlace: spot.vehicleType,
+        ),
+      ),
+    );
+
+    if (!mounted || informations == null) return;
+
+    if (_usingDemoData) {
+      ReservationsLocales.effacerLiberation(spot.id);
+      ReservationsLocales.reserver(
+        informations['plaque']!,
+        spot.id,
+      );
+
+      setState(() {
+        _demoOccupiedIds.add(spot.id);
+        spot.status = SpotStatus.occupied;
+      });
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${_usingDemoData ? 'Occupation simulée' : 'Formulaire validé'} : '
+          'place ${informations['placeId']}, '
+          '${informations['typeVehicule']}, '
+          'plaque ${informations['plaque']}',
+        ),
+      ),
+    );
   }
 
   @override
@@ -456,24 +523,43 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
           ),
         ),
         // Exemple d'utilisation de l'id sélectionné, à remplacer par ton UI
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _selectedId == null
-                      ? 'Aucune place sélectionnée'
-                      : '${sel != null && sel.isLot ? 'Parking' : 'Place'} sélectionné(e) : $_selectedId',
-                ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: sel == null
+          ? const Text('Cliquez sur une place pour afficher ses informations')
+          : Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    sel.isLot ? 'Parking ${sel.id}' : 'Place n°${sel.id}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Statut : ${switch (sel.status) {
+                      SpotStatus.free => 'Libre',
+                      SpotStatus.occupied => 'Occupée',
+                      SpotStatus.reserved => 'Réservée',
+                    }}',
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Type : ${sel.vehicleType}'),
+                  const SizedBox(height: 8),
+                  Text('Largeur : ${sel.width.toStringAsFixed(1)} m'),
+                  Text('Longueur : ${sel.length.toStringAsFixed(1)} m'),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: !sel.isLot && sel.status == SpotStatus.free
+                        ? _reserveSelected
+                        : null,
+                    child: const Text('Réserver'),
+                  ),
+                ],
               ),
-              FilledButton(
-                onPressed: sel != null && sel.status == SpotStatus.free
-                    ? _reserveSelected
-                    : null,
-                child: const Text('Réserver'),
-              ),
-            ],
+            ),
           ),
         ),
       ],

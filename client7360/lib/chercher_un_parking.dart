@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'parking_map_page.dart';
+import 'reprendre_la_route_page.dart';
 
 class ChercherUnParking extends StatelessWidget {
   const ChercherUnParking({super.key});
@@ -36,12 +38,35 @@ class ChercherUnParking extends StatelessWidget {
             const Text('Voir autour de moi', 
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 16),           
             SizedBox(
               height: 164,
               child: ElevatedButton(
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ParkingMapPage(),
+                    ),
+                  );
+                },
                 child: const Text('Cliquer ici pour ouvrir la carte'),
+              ),
+            ),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ReprendreLaRoutePage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.directions_car),
+                label: const Text('Reprendre la route'),
               ),
             ),
             const SizedBox(height: 24),
@@ -50,7 +75,7 @@ class ChercherUnParking extends StatelessWidget {
               ),
             const SizedBox(height: 16),
             _buildButton('Button'),
-            ...List.generate(50, (k) => _buildButton('Bouton numéro ${k}'), ),
+            ...List.generate(50, (k) => _buildButton('Bouton numéro $k'), ),
           ],
         ),
       ),
