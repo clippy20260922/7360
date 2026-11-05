@@ -1,0 +1,7 @@
+steps:
+  - name: build-android-apk
+    image: ghcr.io/cirruslabs/flutter:stable
+    commands:
+      - cd client7360
+      - flutter pub get
+      - flutter build apk --target-platform android-arm64
