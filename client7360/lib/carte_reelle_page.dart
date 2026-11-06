@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -77,7 +79,40 @@ class _CarteReellePageState extends State<CarteReellePage> {
   List<PlaceCarte> _places = [];
   bool _chargement = true;
   String? _erreur;
-  double _zoom = 15; // la taille des marqueurs suit le zoom
+
+  // Palier de zoom : 0 = de loin (simples points), 1 à 3 = pastilles de plus en plus grandes.
+  // On ne reconstruit la page qu'au changement de palier, pas à chaque image du zoom.
+  int _palier = 0;
+  static int palierPour(double zoom) => zoom >= 18.5 ? 3 : zoom >= 17.5 ? 2 : zoom >= 16.5 ? 1 : 0;
+  static const _taillesPastille = [0.0, 12.0, 20.0, 30.0];
+
+  // Calculés une seule fois par chargement (et par palier pour les pastilles)
+  List<Offset> _libresProjetees = [], _occupeesProjetees = [];
+  List<Marker> _pastilles = [];
+
+  void _preparerDessin() {
+    _libresProjetees = [for (final p in _places) if (!p.occupee) projeter(p.position)];
+    _occupeesProjetees = [for (final p in _places) if (p.occupee) projeter(p.position)];
+    _pastilles = _palier == 0 ? [] : [for (final p in _places) _marqueur(p)];
+  }
+
+  /// De loin, un toucher ouvre la place la plus proche (à moins de 14 pixels).
+  void _toucherCarte(TapPosition _, LatLng point) {
+    if (_palier != 0 || _places.isEmpty) return;
+    const distance = Distance();
+    final zoom = _carte.camera.zoom;
+    final metresParPixel = 156543.03 * math.cos(point.latitude * math.pi / 180) / math.pow(2, zoom);
+    PlaceCarte? meilleure;
+    var dMin = 14 * metresParPixel;
+    for (final p in _places) {
+      final d = distance.as(LengthUnit.Meter, p.position, point);
+      if (d < dMin) {
+        dMin = d;
+        meilleure = p;
+      }
+    }
+    if (meilleure != null) _ouvrirFiche(meilleure);
+  }
 
   @override
   void initState() {
@@ -104,7 +139,10 @@ class _CarteReellePageState extends State<CarteReellePage> {
         for (final p in (data['data'] as List<dynamic>? ?? []))
           if (p is Map<String, dynamic>) PlaceCarte.depuisJson(p),
       ].whereType<PlaceCarte>().toList();
-      setState(() => _places = places);
+      setState(() {
+        _places = places;
+        _preparerDessin();
+      });
     } catch (_) {
       if (mounted) setState(() => _erreur = 'Serveur injoignable');
     } finally {
@@ -188,14 +226,7 @@ class _CarteReellePageState extends State<CarteReellePage> {
 
   Marker _marqueur(PlaceCarte place) {
     final couleur = place.occupee ? Colors.red.shade600 : Colors.green.shade600;
-    // Les places sont à 2,5 m les unes des autres : de loin, de simples points
-    final taille = _zoom >= 18.5
-        ? 30.0
-        : _zoom >= 17.5
-            ? 20.0
-            : _zoom >= 16.5
-                ? 12.0
-                : 7.0;
+    final taille = _taillesPastille[_palier];
     final pastille = Container(
       decoration: BoxDecoration(
         color: couleur,
@@ -253,8 +284,15 @@ class _CarteReellePageState extends State<CarteReellePage> {
               initialZoom: 15,
               minZoom: 3,
               maxZoom: 20,
+              onTap: _toucherCarte,
               onPositionChanged: (camera, _) {
-                if ((camera.zoom - _zoom).abs() >= 0.25) setState(() => _zoom = camera.zoom);
+                final palier = palierPour(camera.zoom);
+                if (palier != _palier) {
+                  setState(() {
+                    _palier = palier;
+                    _preparerDessin();
+                  });
+                }
               },
             ),
             children: [
@@ -262,7 +300,12 @@ class _CarteReellePageState extends State<CarteReellePage> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.client7360',
               ),
-              MarkerLayer(markers: [for (final p in _places) _marqueur(p)]),
+              // De loin : toutes les places peintes d'un coup (rapide) ;
+              // de près : des pastilles touchables, seules celles à l'écran sont construites
+              if (_palier == 0)
+                _CouchePoints(libres: _libresProjetees, occupees: _occupeesProjetees)
+              else
+                MarkerLayer(markers: _pastilles),
               const RichAttributionWidget(
                 attributions: [TextSourceAttribution('OpenStreetMap contributors')],
               ),
@@ -293,4 +336,71 @@ class _CarteReellePageState extends State<CarteReellePage> {
       ),
     );
   }
+}
+
+/// Position d'un point en pixels de la carte au zoom 0 (projection Web Mercator, tuiles de 256 px).
+/// Au zoom z, il suffit de multiplier par 2^z : rien à recalculer pendant qu'on fait glisser la carte.
+Offset projeter(LatLng p) {
+  final lat = p.latitude * math.pi / 180;
+  return Offset(
+    (p.longitude + 180) / 360 * 256,
+    (1 - math.log(math.tan(lat) + 1 / math.cos(lat)) / math.pi) / 2 * 256,
+  );
+}
+
+/// De loin : toutes les places peintes d'un coup, deux appels de dessin par couleur.
+/// Bien plus léger que des centaines de widgets (mesuré : la carte restait fluide).
+class _CouchePoints extends StatelessWidget {
+  const _CouchePoints({required this.libres, required this.occupees});
+
+  final List<Offset> libres, occupees; // positions au zoom 0, voir projeter()
+
+  @override
+  Widget build(BuildContext context) {
+    final camera = MapCamera.of(context);
+    return MobileLayerTransformer(
+      child: CustomPaint(size: Size.infinite, painter: _PeintrePoints(camera, libres, occupees)),
+    );
+  }
+}
+
+class _PeintrePoints extends CustomPainter {
+  _PeintrePoints(this.camera, this.libres, this.occupees);
+
+  final MapCamera camera;
+  final List<Offset> libres, occupees;
+
+  static Paint _crayon(Color c, double epaisseur) => Paint()
+    ..color = c
+    ..strokeWidth = epaisseur
+    ..strokeCap = StrokeCap.round;
+  static final _contour = _crayon(Colors.white, 9);
+  static final _vert = _crayon(Colors.green.shade600, 7);
+  static final _rouge = _crayon(Colors.red.shade600, 7);
+
+  List<Offset> _aLEcran(List<Offset> base, Size size) {
+    final echelle = math.pow(2, camera.zoom).toDouble();
+    final origine = camera.pixelOrigin;
+    return [
+      for (final b in base)
+        if (b.dx * echelle - origine.dx > -10 &&
+            b.dy * echelle - origine.dy > -10 &&
+            b.dx * echelle - origine.dx < size.width + 10 &&
+            b.dy * echelle - origine.dy < size.height + 10)
+          b * echelle - origine,
+    ];
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final l = _aLEcran(libres, size);
+    final o = _aLEcran(occupees, size);
+    canvas.drawPoints(PointMode.points, l, _contour);
+    canvas.drawPoints(PointMode.points, o, _contour);
+    canvas.drawPoints(PointMode.points, l, _vert);
+    canvas.drawPoints(PointMode.points, o, _rouge);
+  }
+
+  @override
+  bool shouldRepaint(_PeintrePoints ancien) => true;
 }
