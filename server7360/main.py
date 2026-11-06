@@ -832,3 +832,108 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
          raise HTTPException(status_code=400, detail="username ou mot de passe erroné")
      set_user_info(form_data.username)
      return {"username":data[0], "type":current_user.type}
+
+
+
+########## Paiement d'une place (SCRUM-13) ##########
+
+# Durée maximale qu'on peut payer d'un coup (en minutes)
+DUREE_MAX = 24 * 60
+Duree = Annotated[int, Query(gt=0, le=DUREE_MAX)]
+
+def connexion_paiement() -> sqlite3.Connection:
+    #La table des paiements est créée au premier besoin (pas de DROP : on garde l'historique)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS paiement_table ("\
+        " paiement_id INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " username char[30] NOT NULL,"\
+        " slot_id INTEGER NOT NULL,"\
+        " no_plaque char[9] NOT NULL,"\
+        " montant float NOT NULL,"\
+        " date_paiement timestamp NOT NULL,"\
+        " fin_occupation timestamp NOT NULL)"
+    )
+    return conn
+
+def calcul_prix(tarif_horaire: float, duree: int) -> float:
+    #Tarif de la place (slot_tarif, en euros par heure) au prorata des minutes, arrondi au centime
+    return round(tarif_horaire * duree / 60, 2)
+
+def lire_ts(texte: str) -> datetime | None:
+    #Lit un timestamp de la base (UTC) ; None s'il est illisible
+    try:
+        return datetime.strptime(texte, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+### Prix d'une place pour une durée (en minutes), avant de payer
+
+@app.get("/data/{id:int}/prix")
+def get_prix(id: int, duree: Duree) -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    place = conn.execute("SELECT slot_type, slot_tarif FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
+    conn.close()
+    if place is None:
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+    return {"place": id, "type": place[0], "duree": duree, "tarif_horaire": place[1], "prix": calcul_prix(place[1], duree)}
+
+### Payer une place : elle passe occupée jusqu'à la fin de la durée payée
+# Si le véhicule est déjà garé sur cette place (par exemple sans avoir payé), le paiement prolonge la durée.
+
+@app.post("/data/{id:int}/payer")
+def payer_place(id: int, plaque: str, duree: Duree) -> dict:
+    if current_user.username == "":
+        raise HTTPException(status_code=401, detail="Connectez-vous pour payer")
+    plaque = plaque.strip().upper()
+
+    conn = connexion_paiement()
+    try:
+        place = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (id,)).fetchone()
+        if place is None:
+            raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+
+        #Le véhicule doit appartenir à l'utilisateur connecté et correspondre au type de place
+        vehicule = conn.execute("SELECT * FROM vehicle_table WHERE no_plaque = ? AND proprietaire = ?", (plaque, current_user.username)).fetchone()
+        if vehicule is None:
+            raise HTTPException(status_code=403, detail="Ce véhicule n'est pas enregistré à votre nom")
+        if vehicule["type_vehicule"] != place["slot_type"]:
+            raise HTTPException(status_code=400, detail="Ce véhicule ne correspond pas au type de place")
+
+        #Un véhicule ne peut pas occuper deux places en même temps
+        autre_place = vehicule["current_slot"]
+        if autre_place is not None and autre_place != id:
+            autre = conn.execute("SELECT slot_occupied FROM slot_table WHERE slot_id = ?", (autre_place,)).fetchone()
+            if autre is not None and autre[0]:
+                raise HTTPException(status_code=409, detail="Ce véhicule est déjà garé sur la place " + str(autre_place))
+
+        maintenant = utc_now()
+        prolongation = autre_place == id and bool(place["slot_occupied"])
+        if prolongation:
+            #On repart de la fin déjà payée si elle n'est pas encore passée
+            fin_payee = lire_ts(place["fin_occupation"])
+            debut = max(maintenant, fin_payee) if fin_payee is not None else maintenant
+        else:
+            debut = maintenant
+        fin = ts(debut + timedelta(minutes=duree))
+        prix = calcul_prix(place["slot_tarif"], duree)
+
+        if prolongation:
+            conn.execute("UPDATE slot_table SET fin_occupation = ? WHERE slot_id = ?", (fin, id))
+        else:
+            #Le "AND slot_occupied = false" évite que deux personnes paient la même place en même temps
+            cur = conn.execute("UPDATE slot_table SET slot_occupied = true, fin_occupation = ? WHERE slot_id = ? AND slot_occupied = false", (fin, id))
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=409, detail="Place déjà occupée")
+        conn.execute("UPDATE vehicle_table SET current_slot = ? WHERE no_plaque = ?", (id, plaque))
+        cur = conn.execute(
+            "INSERT INTO paiement_table (username, slot_id, no_plaque, montant, date_paiement, fin_occupation) "\
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (current_user.username, id, plaque, prix, ts(maintenant), fin)
+        )
+        conn.commit()
+        return {"paiement": cur.lastrowid, "place": id, "plaque": plaque, "duree": duree, "prix": prix,
+                "fin_occupation": fin, "prolongation": prolongation}
+    finally:
+        conn.close()

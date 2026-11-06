@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import 'parking_map_view.dart';
 import 'informations_vehicule_page.dart';
+import 'paiement_page.dart';
 import 'reservations_locales.dart';
 
 import 'package:flutter/foundation.dart'
@@ -556,6 +557,21 @@ class _ParkingMapPageState extends State<ParkingMapPage> {
                         ? _reserveSelected
                         : null,
                     child: const Text('Réserver'),
+                  ),
+                  const SizedBox(height: 8),
+                  // Payer la place (SCRUM-13) : seulement pour une vraie place du serveur
+                  OutlinedButton.icon(
+                    onPressed: !sel.isLot && !_usingDemoData && int.tryParse(sel.id) != null
+                        ? () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    PaiementPage(idPlace: int.parse(sel.id)),
+                              ),
+                            )
+                        : null,
+                    icon: const Icon(Icons.euro),
+                    label: const Text('Payer'),
                   ),
                 ],
               ),
