@@ -77,6 +77,7 @@ class _CarteReellePageState extends State<CarteReellePage> {
   List<PlaceCarte> _places = [];
   bool _chargement = true;
   String? _erreur;
+  double _zoom = 15; // la taille des marqueurs suit le zoom
 
   @override
   void initState() {
@@ -112,13 +113,20 @@ class _CarteReellePageState extends State<CarteReellePage> {
   }
 
   void _voirToutesLesPlaces() {
-    if (_places.isEmpty) return;
-    if (_places.length == 1) {
-      _carte.move(_places.first.position, 17);
+    // On cadre les places autour du campus (à moins de 30 km de l'ESIEE) :
+    // les places de démo ont des coordonnées fictives, loin de tout.
+    const distance = Distance();
+    final proches = _places
+        .where((p) => distance.as(LengthUnit.Kilometer, p.position, CarteReellePage.esiee) < 30)
+        .toList();
+    final cadre = proches.isEmpty ? _places : proches;
+    if (cadre.isEmpty) return;
+    if (cadre.length == 1) {
+      _carte.move(cadre.first.position, 17);
       return;
     }
     _carte.fitCamera(CameraFit.coordinates(
-      coordinates: [for (final p in _places) p.position],
+      coordinates: [for (final p in cadre) p.position],
       padding: const EdgeInsets.all(48),
       maxZoom: 18,
     ));
@@ -180,28 +188,33 @@ class _CarteReellePageState extends State<CarteReellePage> {
 
   Marker _marqueur(PlaceCarte place) {
     final couleur = place.occupee ? Colors.red.shade600 : Colors.green.shade600;
+    // Les places sont à 2,5 m les unes des autres : de loin, de simples points
+    final taille = _zoom >= 18.5
+        ? 30.0
+        : _zoom >= 17.5
+            ? 20.0
+            : _zoom >= 16.5
+                ? 12.0
+                : 7.0;
+    final pastille = Container(
+      decoration: BoxDecoration(
+        color: couleur,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: taille >= 20 ? 2 : 1),
+        boxShadow: taille >= 20 ? const [BoxShadow(blurRadius: 3, color: Colors.black38)] : null,
+      ),
+      child: taille >= 20
+          ? Icon(place.type == 'moto' ? Icons.two_wheeler : Icons.local_parking,
+              color: Colors.white, size: taille * 0.6)
+          : null,
+    );
     return Marker(
       point: place.position,
-      width: 36,
-      height: 36,
+      width: taille,
+      height: taille,
       child: GestureDetector(
         onTap: () => _ouvrirFiche(place),
-        child: Tooltip(
-          message: 'Place n°${place.id}',
-          child: Container(
-            decoration: BoxDecoration(
-              color: couleur,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: const [BoxShadow(blurRadius: 3, color: Colors.black38)],
-            ),
-            child: Icon(
-              place.type == 'moto' ? Icons.two_wheeler : Icons.local_parking,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-        ),
+        child: taille >= 20 ? Tooltip(message: 'Place n°${place.id}', child: pastille) : pastille,
       ),
     );
   }
@@ -235,11 +248,14 @@ class _CarteReellePageState extends State<CarteReellePage> {
         children: [
           FlutterMap(
             mapController: _carte,
-            options: const MapOptions(
+            options: MapOptions(
               initialCenter: CarteReellePage.esiee,
               initialZoom: 15,
               minZoom: 3,
-              maxZoom: 19,
+              maxZoom: 20,
+              onPositionChanged: (camera, _) {
+                if ((camera.zoom - _zoom).abs() >= 0.25) setState(() => _zoom = camera.zoom);
+              },
             ),
             children: [
               TileLayer(

@@ -342,6 +342,7 @@ class DataPayload(BaseModel):
 
 def startup_event() -> None:
     init_slot_table(DB_PATH)
+    init_places_reelles(DB_PATH)  # places réelles de la Cité Descartes (SCRUM-53), en fin de fichier
     init_vehicule_table(DB_PATH)
     init_parking_table(DB_PATH)
     init_rue_table(DB_PATH)
@@ -627,7 +628,8 @@ def position_plan(x, y, lat, long, ref_lat, ref_long) -> tuple:
 def get_parking() -> dict:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    slots = conn.execute("SELECT * FROM slot_table ORDER BY slot_id").fetchall()
+    #Les places réelles (slot_id >= PREMIER_ID_REEL) vont sur la vraie carte, pas sur ce plan dessiné
+    slots = conn.execute("SELECT * FROM slot_table WHERE slot_id < ? ORDER BY slot_id", (PREMIER_ID_REEL,)).fetchall()
     lots = conn.execute("SELECT * FROM parking_table").fetchall()
     roads = conn.execute("SELECT * FROM plan_road_table").fetchall()
     buildings = conn.execute("SELECT * FROM plan_building_table").fetchall()
@@ -967,3 +969,31 @@ def get_places_carte() -> dict:
         "occupee": bool(r["slot_occupied"]),
     } for r in rows]
     return {"N": len(data), "data": data}
+
+
+
+########## Places réelles de la Cité Descartes (SCRUM-53) ##########
+
+# Fichier généré par outils/places-reelles (OpenStreetMap + détection YOLO sur photo IGN)
+PLACES_REELLES = Path(__file__).with_name("places_cite_descartes.json")
+# Les places réelles commencent à cet identifiant : les places de démo (1 à 9) ne bougent pas
+PREMIER_ID_REEL = 1001
+
+def init_places_reelles(DB_PATH: Path) -> None:
+    #Ajoute les places réelles si elles ne sont pas encore en base (on garde leur occupation entre deux démarrages)
+    if not PLACES_REELLES.exists():
+        return
+    conn = sqlite3.connect(DB_PATH)
+    deja = conn.execute("SELECT COUNT(*) FROM slot_table WHERE slot_id >= ?", (PREMIER_ID_REEL,)).fetchone()[0]
+    if deja == 0:
+        places = json.loads(PLACES_REELLES.read_text(encoding="utf-8"))["places"]
+        conn.executemany(
+            "INSERT INTO slot_table (slot_id, slot_adresse, slot_ville, slot_lat, slot_long, slot_type, slot_pmr, "\
+            "slot_elec, parking, slot_tarif, slot_occupied, fin_occupation, slot_angle) "\
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false, '1900-01-01 00:00:00', ?)",
+            [(p["slot_id"], p["slot_adresse"], p["slot_ville"], p["slot_lat"], p["slot_long"], p["slot_type"],
+              p["slot_pmr"], p["slot_elec"], p["parking"], p["slot_tarif"], p["slot_angle"]) for p in places]
+        )
+        conn.commit()
+    conn.close()
+
