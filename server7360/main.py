@@ -342,9 +342,9 @@ class DataPayload(BaseModel):
 
 def startup_event() -> None:
     init_slot_table(DB_PATH)
-    init_places_reelles(DB_PATH)  # places réelles de la Cité Descartes (SCRUM-53), en fin de fichier
     init_vehicule_table(DB_PATH)
     init_parking_table(DB_PATH)
+    init_places_reelles(DB_PATH)  # places et parkings réels de la Cité Descartes (SCRUM-53, 60), en fin de fichier
     init_rue_table(DB_PATH)
     init_batiment_table(DB_PATH)
     init_plan_tables(DB_PATH)
@@ -630,7 +630,8 @@ def get_parking() -> dict:
     conn.row_factory = sqlite3.Row
     #Les places réelles (slot_id >= PREMIER_ID_REEL) vont sur la vraie carte, pas sur ce plan dessiné
     slots = conn.execute("SELECT * FROM slot_table WHERE slot_id < ? ORDER BY slot_id", (PREMIER_ID_REEL,)).fetchall()
-    lots = conn.execute("SELECT * FROM parking_table").fetchall()
+    #Pareil pour les parkings réels (parking_genre renseigné)
+    lots = conn.execute("SELECT * FROM parking_table WHERE parking_genre IS NULL").fetchall()
     roads = conn.execute("SELECT * FROM plan_road_table").fetchall()
     buildings = conn.execute("SELECT * FROM plan_building_table").fetchall()
     zones = conn.execute("SELECT * FROM plan_zone_table").fetchall()
@@ -979,21 +980,97 @@ PLACES_REELLES = Path(__file__).with_name("places_cite_descartes.json")
 # Les places réelles commencent à cet identifiant : les places de démo (1 à 9) ne bougent pas
 PREMIER_ID_REEL = 1001
 
+import hashlib  # empreinte du fichier des places réelles
+
+# Parkings réels (SCRUM-60) : parking_genre vaut « parking » ou « rue » ; NULL = parking du plan dessiné
+COLONNES_PARKING_REEL = {"parking_genre": "char[10]", "parking_contour": "text"}
+
 def init_places_reelles(DB_PATH: Path) -> None:
-    #Ajoute les places réelles si elles ne sont pas encore en base (on garde leur occupation entre deux démarrages)
-    if not PLACES_REELLES.exists():
-        return
+    #Met en base les places réelles et leurs parkings, puis les tient à jour quand le fichier change.
+    #L'occupation d'une place (slot_occupied, fin_occupation) n'est jamais écrasée.
     conn = sqlite3.connect(DB_PATH)
-    deja = conn.execute("SELECT COUNT(*) FROM slot_table WHERE slot_id >= ?", (PREMIER_ID_REEL,)).fetchone()[0]
-    if deja == 0:
-        places = json.loads(PLACES_REELLES.read_text(encoding="utf-8"))["places"]
+    ensure_columns(conn, "parking_table", COLONNES_PARKING_REEL)
+    conn.execute("CREATE TABLE IF NOT EXISTS places_reelles_version (empreinte char[40] NOT NULL)")
+    conn.commit()
+    if not PLACES_REELLES.exists():
+        conn.close()
+        return
+    texte = PLACES_REELLES.read_text(encoding="utf-8")
+    empreinte = hashlib.sha1(texte.encode("utf-8")).hexdigest()
+    deja = conn.execute("SELECT empreinte FROM places_reelles_version").fetchone()
+    if deja and deja[0] == empreinte:
+        conn.close()
+        return  # fichier inchangé : la base n'est pas réécrite
+    donnees = json.loads(texte)
+    parkings, places = donnees.get("parkings", []), donnees["places"]
+    with conn:  # une seule transaction
+        conn.execute("CREATE TEMP TABLE garder (nom text, id integer)")
+        conn.executemany("INSERT INTO garder (nom) VALUES (?)", [(p["parking_name"],) for p in parkings])
+        conn.executemany("INSERT INTO garder (id) VALUES (?)", [(p["slot_id"],) for p in places])
+        #Ce qui n'est plus dans le fichier s'en va (une place occupée attend d'être libérée)
+        conn.execute(
+            "DELETE FROM slot_table WHERE slot_id >= ? AND NOT slot_occupied "\
+            "AND slot_id NOT IN (SELECT id FROM garder WHERE id IS NOT NULL)", (PREMIER_ID_REEL,))
+        conn.execute(
+            "DELETE FROM parking_table WHERE parking_genre IS NOT NULL "\
+            "AND parking_name NOT IN (SELECT nom FROM garder WHERE nom IS NOT NULL)")
+        conn.executemany(
+            "INSERT INTO parking_table (parking_name, parking_adresse, parking_lat, parking_long, parking_genre, "\
+            "parking_contour) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(parking_name) DO UPDATE SET "\
+            "parking_adresse = excluded.parking_adresse, parking_lat = excluded.parking_lat, "\
+            "parking_long = excluded.parking_long, parking_genre = excluded.parking_genre, "\
+            "parking_contour = excluded.parking_contour WHERE parking_table.parking_genre IS NOT NULL",
+            [(p["parking_name"], p["parking_adresse"], p["parking_lat"], p["parking_long"], p["parking_genre"],
+              json.dumps(p["parking_contour"]) if p.get("parking_contour") else None) for p in parkings]
+        )
         conn.executemany(
             "INSERT INTO slot_table (slot_id, slot_adresse, slot_ville, slot_lat, slot_long, slot_type, slot_pmr, "\
             "slot_elec, parking, slot_tarif, slot_occupied, fin_occupation, slot_angle) "\
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false, '1900-01-01 00:00:00', ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false, '1900-01-01 00:00:00', ?) ON CONFLICT(slot_id) DO UPDATE SET "\
+            "slot_adresse = excluded.slot_adresse, slot_ville = excluded.slot_ville, slot_lat = excluded.slot_lat, "\
+            "slot_long = excluded.slot_long, slot_type = excluded.slot_type, slot_pmr = excluded.slot_pmr, "\
+            "slot_elec = excluded.slot_elec, parking = excluded.parking, slot_tarif = excluded.slot_tarif, "\
+            "slot_angle = excluded.slot_angle",
             [(p["slot_id"], p["slot_adresse"], p["slot_ville"], p["slot_lat"], p["slot_long"], p["slot_type"],
               p["slot_pmr"], p["slot_elec"], p["parking"], p["slot_tarif"], p["slot_angle"]) for p in places]
         )
-        conn.commit()
+        conn.execute("DROP TABLE garder")
+        conn.execute("DELETE FROM places_reelles_version")
+        conn.execute("INSERT INTO places_reelles_version (empreinte) VALUES (?)", (empreinte,))
     conn.close()
+
+
+########## Parkings réels : places regroupées par parking ou par rue (SCRUM-60) ##########
+
+@app.get("/data/parkings")
+def get_parkings_reels() -> dict:
+    #Chaque parking ou rue de la vraie carte, avec son nombre de places libres
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT p.parking_name, p.parking_adresse, p.parking_lat, p.parking_long, p.parking_genre, "\
+        "p.parking_contour, COUNT(s.slot_id) AS places, "\
+        "COALESCE(SUM(CASE WHEN s.slot_id IS NOT NULL AND NOT s.slot_occupied THEN 1 ELSE 0 END), 0) AS libres, "\
+        "COALESCE(SUM(s.slot_pmr), 0) AS pmr, COALESCE(SUM(s.slot_elec), 0) AS elec, "\
+        "MIN(s.slot_tarif) AS tarif_min, MAX(s.slot_tarif) AS tarif_max "\
+        "FROM parking_table p LEFT JOIN slot_table s ON s.parking = p.parking_name AND s.slot_id >= ? "\
+        "WHERE p.parking_genre IS NOT NULL GROUP BY p.parking_name ORDER BY places DESC, p.parking_name",
+        (PREMIER_ID_REEL,)
+    ).fetchall()
+    conn.close()
+    data = [{
+        "nom": r["parking_name"],
+        "genre": r["parking_genre"],
+        "adresse": r["parking_adresse"],
+        "lat": r["parking_lat"],
+        "long": r["parking_long"],
+        "contour": json.loads(r["parking_contour"]) if r["parking_contour"] else None,
+        "places": r["places"],
+        "libres": r["libres"],
+        "pmr": r["pmr"],
+        "elec": r["elec"],
+        "tarif_min": r["tarif_min"],
+        "tarif_max": r["tarif_max"],
+    } for r in rows]
+    return {"N": len(data), "data": data}
 

@@ -9,7 +9,10 @@ Bibliothèque standard seulement. Sources, de la plus sûre à la plus estimée 
   4. amenity=parking en surface avec `capacity` et sans place dessinée : grille de places
   5. amenity=motorcycle_parking    : places moto
 Les parkings publics en surface sans place ni capacité sont listés dans
-`a_completer` pour l'étape 2 (détection des voitures par YOLO sur photo IGN).
+`a_completer` pour l'étape 2 (détection des voitures par YOLO sur photo IGN). Un parking
+où OSM n'a dessiné que quelques places (souvent les places handicapés) y va aussi.
+Les contours des parkings publics sont gardés dans `parkings` : fusion.py s'en sert
+pour regrouper les places par parking.
 Les parkings privés (access=private) sont écartés : l'appli est pour le public.
 
 Usage : python3 places_osm.py [--rafraichir] [--avec-prives]
@@ -51,6 +54,7 @@ OUI_STATIONNEMENT = {"yes", "lane", "street_side", "on_kerb", "half_on_kerb", "s
                      "parallel", "diagonal", "perpendicular", "marked", "inline"}
 PRIVES = {"private", "no", "permit", "delivery"}
 TARIF_RUE, TARIF_PARKING = 1.6, 2.0  # mêmes valeurs que les places de démo de l'équipe
+M2_PAR_PLACE = 25  # surface d'un parking par place, allées comprises
 
 
 def requete_overpass(rafraichir):
@@ -202,6 +206,16 @@ def decouper_bande(col, e, poly, tags, cle, source):
     return poses
 
 
+def capacite_estimee(poly, tags, bande, aire):
+    """Nombre de places que peut contenir un parking ou une bande (capacité OSM si elle est donnée)."""
+    if entier(tags.get("capacity")):
+        return entier(tags["capacity"])
+    if bande:  # même calcul que decouper_bande
+        _, L, W, _ = rectangle_min(poly)
+        return max(1, int(L // DIM[orientation_bande(tags, W)][2]))
+    return aire / M2_PAR_PLACE
+
+
 def grille_parking(col, poly, capacite, nom, cle):
     """Parking en surface dont on connaît la capacité : rangées de places en bataille."""
     centre, L, W, a = rectangle_min(poly)
@@ -327,34 +341,44 @@ def main():
                        tarif=TARIF_PARKING if parent else TARIF_RUE, cle_commune=k):
             stats["1_places_dessinees"] += 1
 
-    def contient_places(poly):
-        return any(dedans(p, poly) for p in places_dessinees)
+    def places_dans(poly):
+        return sum(dedans(p, poly) for p in places_dessinees)
 
-    a_completer, prives_sans_places = [], 0
+    a_completer, prives_sans_places, lots_publics = [], 0, []
     # 2. Bandes le long des rues, puis 4. parkings en surface avec capacité
     for k, (e, poly) in sorted(parkings.items()):
         t = e["tags"]
-        if poly is None or contient_places(poly):
+        if poly is None:
             continue
+        dessinees = places_dans(poly)
         if prive(t):
-            col.ecartees["parking_prive"] += 1
-            prives_sans_places += 1
+            if not dessinees:
+                col.ecartees["parking_prive"] += 1
+                prives_sans_places += 1
             continue
         genre = t.get("parking", "surface")
         if genre in ("underground", "multi-storey", "rooftop"):
             col.ecartees["parking_ferme_ou_souterrain"] += 1
             continue
-        if genre in ("street_side", "lane", "layby"):
+        bande = genre in ("street_side", "lane", "layby")
+        aire, c = aire_centre(poly)
+        contour_ll = [[round(v, 7) for v in vers_latlon(x, y)] for x, y in poly]
+        if not bande:  # un vrai parking : fusion.py y regroupe les places qu'il contient
+            lots_publics.append({"osm": k, "nom": t.get("name"), "access": t.get("access"),
+                                 "fee": t.get("fee"), "aire_m2": round(aire), "contour": contour_ll})
+        # Déjà dessiné place par place ? Il en faut au moins la moitié de ce qu'il peut contenir :
+        # souvent OSM n'a dessiné que les places handicapés, et le reste du parking manquerait.
+        if dessinees and dessinees >= capacite_estimee(poly, t, bande, aire) / 2:
+            continue
+        if bande:
             stats["2_bandes_de_rue"] += decouper_bande(col, e, poly, t, k, f"osm:{k}:bande")
         elif entier(t.get("capacity")):
             stats["4_grilles_capacite"] += grille_parking(col, poly, entier(t["capacity"]), t.get("name"), k)
-        else:
-            aire, c = aire_centre(poly)
-            if aire >= 150:  # moins de 150 m² : pas un vrai parking
-                lat, lon = vers_latlon(*c)
-                a_completer.append({"osm": k, "nom": t.get("name"), "aire_m2": round(aire),
-                                    "centre": [round(lat, 6), round(lon, 6)],
-                                    "contour": [[round(v, 7) for v in vers_latlon(x, y)] for x, y in poly]})
+        elif aire >= 150:  # moins de 150 m² : pas un vrai parking
+            lat, lon = vers_latlon(*c)
+            a_completer.append({"osm": k, "nom": t.get("name"), "aire_m2": round(aire),
+                                "places_osm": dessinees, "centre": [round(lat, 6), round(lon, 6)],
+                                "contour": contour_ll})
 
     # 3. Rues marquées « stationnement autorisé »
     for k, e in objets.items():
@@ -383,6 +407,7 @@ def main():
         "stats": {**stats, "ecartees": dict(col.ecartees), "parkings_prives_ignores": prives_sans_places},
         "places": col.places,
         "a_completer": a_completer,
+        "parkings": lots_publics,
     }
     SORTIE.write_text(json.dumps(resultat, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"{len(col.places)} places -> {SORTIE.name}")

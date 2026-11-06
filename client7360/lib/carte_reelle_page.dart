@@ -5,7 +5,7 @@ import 'dart:ui' show PointMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' hide Path;
 
 import 'paiement_page.dart';
 import 'parking_map_page.dart' show ParkingService;
@@ -60,6 +60,84 @@ class PlaceCarte {
       };
 }
 
+/// Un groupe de places (SCRUM-60) : un parking, ou une rue. Renvoyé par GET /data/parkings.
+class GroupeCarte {
+  const GroupeCarte({
+    required this.nom,
+    required this.genre,
+    required this.position,
+    this.adresse,
+    this.contour = const [],
+    this.places = 0,
+    this.libres = 0,
+    this.pmr = 0,
+    this.elec = 0,
+    this.tarifMin,
+    this.tarifMax,
+  });
+
+  final String nom;
+  final String genre; // parking, rue
+  final String? adresse;
+  final LatLng position;
+  final List<LatLng> contour; // vide pour une rue
+  final int places, libres, pmr, elec;
+  final double? tarifMin, tarifMax;
+
+  bool get estParking => genre == 'parking';
+
+  static GroupeCarte? depuisJson(Map<String, dynamic> j) {
+    final lat = (j['lat'] as num?)?.toDouble();
+    final long = (j['long'] as num?)?.toDouble();
+    final nom = j['nom'] as String?;
+    if (nom == null || lat == null || long == null) return null;
+    return GroupeCarte(
+      nom: nom,
+      genre: (j['genre'] as String?) ?? 'parking',
+      adresse: j['adresse'] as String?,
+      position: LatLng(lat, long),
+      contour: [
+        for (final c in (j['contour'] as List<dynamic>? ?? []))
+          if (c is List && c.length == 2) LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble()),
+      ],
+      places: (j['places'] as num?)?.toInt() ?? 0,
+      libres: (j['libres'] as num?)?.toInt() ?? 0,
+      pmr: (j['pmr'] as num?)?.toInt() ?? 0,
+      elec: (j['elec'] as num?)?.toInt() ?? 0,
+      tarifMin: (j['tarif_min'] as num?)?.toDouble(),
+      tarifMax: (j['tarif_max'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// Taille d'un repère de groupe à l'écran (pixels).
+const tailleRepere = Size(86, 28);
+
+/// Repères qui tiennent à l'écran au zoom donné sans se chevaucher :
+/// les parkings d'abord, puis les rues, et dans chaque genre les plus gros groupes.
+List<GroupeCarte> reperesVisibles(List<GroupeCarte> groupes, double zoom) {
+  final echelle = math.pow(2, zoom).toDouble();
+  final tries = [...groupes]..sort((a, b) {
+      if (a.estParking != b.estParking) return a.estParking ? -1 : 1;
+      return b.places.compareTo(a.places);
+    });
+  final pris = <Rect>[];
+  final gardes = <GroupeCarte>[];
+  for (final g in tries) {
+    if (g.places == 0) continue;
+    final r = Rect.fromCenter(
+        center: projeter(g.position) * echelle,
+        width: tailleRepere.width + 4,
+        height: tailleRepere.height + 4);
+    if (pris.any(r.overlaps)) continue;
+    pris.add(r);
+    gardes.add(g);
+  }
+  return gardes;
+}
+
+String euros(double v) => '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
+
 /// Vraie carte OpenStreetMap (SCRUM-52) avec les places du serveur.
 /// Vert = libre, rouge = occupée. Toucher une place affiche sa fiche,
 /// d'où l'on peut la payer.
@@ -77,6 +155,8 @@ class _CarteReellePageState extends State<CarteReellePage> {
   final MapController _carte = MapController();
 
   List<PlaceCarte> _places = [];
+  List<GroupeCarte> _groupes = [];
+  Map<String, GroupeCarte> _groupeParNom = {};
   bool _chargement = true;
   String? _erreur;
 
@@ -85,22 +165,55 @@ class _CarteReellePageState extends State<CarteReellePage> {
   int _palier = 0;
   static int palierPour(double zoom) => zoom >= 18.5 ? 3 : zoom >= 17.5 ? 2 : zoom >= 16.5 ? 1 : 0;
   static const _taillesPastille = [0.0, 12.0, 20.0, 30.0];
+  // De loin, les repères de groupe sont recalculés tous les demi-crans de zoom
+  int _cran = 30;
+  static int cranPour(double zoom) => (zoom * 2).floor();
 
   // Calculés une seule fois par chargement (et par palier pour les pastilles)
   List<Offset> _libresProjetees = [], _occupeesProjetees = [];
   List<Marker> _pastilles = [];
+  List<List<Offset>> _contoursProjetes = [];
+  Map<String, _DessinRepere> _dessins = {}; // textes des repères, mis en page une seule fois
+  List<GroupeCarte> _reperes = [];
 
   void _preparerDessin() {
     _libresProjetees = [for (final p in _places) if (!p.occupee) projeter(p.position)];
     _occupeesProjetees = [for (final p in _places) if (p.occupee) projeter(p.position)];
     _pastilles = _palier == 0 ? [] : [for (final p in _places) _marqueur(p)];
+    _contoursProjetes = [
+      for (final g in _groupes)
+        if (g.contour.length >= 3) [for (final c in g.contour) projeter(c)],
+    ];
+    _preparerReperes();
   }
 
-  /// De loin, un toucher ouvre la place la plus proche (à moins de 14 pixels).
+  void _preparerReperes() {
+    _reperes = _palier == 0 ? reperesVisibles(_groupes, _cran / 2) : [];
+  }
+
+  @override
+  void dispose() {
+    for (final d in _dessins.values) {
+      d.dispose();
+    }
+    super.dispose();
+  }
+
+  /// De loin, un toucher ouvre le repère de groupe touché, sinon la place la plus proche (à moins de 14 pixels).
   void _toucherCarte(TapPosition _, LatLng point) {
     if (_palier != 0 || _places.isEmpty) return;
-    const distance = Distance();
     final zoom = _carte.camera.zoom;
+    final echelle = math.pow(2, zoom).toDouble();
+    final ici = projeter(point) * echelle;
+    for (final g in _reperes) {
+      final r = Rect.fromCenter(
+          center: projeter(g.position) * echelle, width: tailleRepere.width, height: tailleRepere.height);
+      if (r.contains(ici)) {
+        _ouvrirFicheGroupe(g);
+        return;
+      }
+    }
+    const distance = Distance();
     final metresParPixel = 156543.03 * math.cos(point.latitude * math.pi / 180) / math.pow(2, zoom);
     PlaceCarte? meilleure;
     var dMin = 14 * metresParPixel;
@@ -126,21 +239,38 @@ class _CarteReellePageState extends State<CarteReellePage> {
       _erreur = null;
     });
     try {
-      final reponse = await http
-          .get(Uri.parse('${ParkingService.baseUrl}/data/carte'))
-          .timeout(const Duration(seconds: 10));
+      final base = ParkingService.baseUrl;
+      final reponses = await Future.wait([
+        http.get(Uri.parse('$base/data/carte')),
+        // Les groupes sont un plus : sans eux (ancien serveur), la carte marche quand même
+        http.get(Uri.parse('$base/data/parkings')).catchError((_) => http.Response('', 503)),
+      ]).timeout(const Duration(seconds: 10));
+      final reponse = reponses[0];
       if (!mounted) return;
       if (reponse.statusCode != 200) {
         setState(() => _erreur = 'Erreur serveur (${reponse.statusCode})');
         return;
       }
-      final data = jsonDecode(utf8.decode(reponse.bodyBytes)) as Map<String, dynamic>;
+      List<dynamic> lignes(http.Response r) =>
+          (jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>)['data'] as List<dynamic>? ?? [];
       final places = [
-        for (final p in (data['data'] as List<dynamic>? ?? []))
+        for (final p in lignes(reponse))
           if (p is Map<String, dynamic>) PlaceCarte.depuisJson(p),
       ].whereType<PlaceCarte>().toList();
+      final groupes = reponses[1].statusCode == 200
+          ? [
+              for (final g in lignes(reponses[1]))
+                if (g is Map<String, dynamic>) GroupeCarte.depuisJson(g),
+            ].whereType<GroupeCarte>().toList()
+          : <GroupeCarte>[];
       setState(() {
         _places = places;
+        _groupes = groupes;
+        _groupeParNom = {for (final g in groupes) g.nom: g};
+        for (final d in _dessins.values) {
+          d.dispose();
+        }
+        _dessins = {for (final g in groupes) g.nom: _DessinRepere(g)};
         _preparerDessin();
       });
     } catch (_) {
@@ -184,7 +314,21 @@ class _CarteReellePageState extends State<CarteReellePage> {
               const SizedBox(height: 8),
               if (place.adresse != null || place.ville != null)
                 Text([place.adresse, place.ville].whereType<String>().join(', ')),
-              if (place.parking != null) Text('Parking : ${place.parking}'),
+              if (_groupeParNom[place.parking] case final g?)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(g.estParking ? Icons.local_parking : Icons.add_road, color: Colors.blue.shade700),
+                  title: Text(g.estParking ? g.nom : 'Dans la rue : ${g.nom}'),
+                  subtitle: Text('${g.libres} libre(s) sur ${g.places}'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(contexteFiche);
+                    _ouvrirFicheGroupe(g);
+                  },
+                )
+              else if (place.parking != null)
+                Text('Parking : ${place.parking}'),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -214,6 +358,80 @@ class _CarteReellePageState extends State<CarteReellePage> {
                       context,
                       MaterialPageRoute(builder: (_) => PaiementPage(idPlace: place.id)),
                     ).then((_) => _charger()); // la place a pu passer occupée
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Cadre la carte sur un parking (son contour) ou une rue (ses places), d'assez près pour toucher les places.
+  void _voirGroupe(GroupeCarte g) {
+    final points = g.contour.length >= 3
+        ? g.contour
+        : [for (final p in _places) if (p.parking == g.nom) p.position];
+    if (points.length < 2) {
+      _carte.move(points.isEmpty ? g.position : points.first, 18.6);
+      return;
+    }
+    _carte.fitCamera(CameraFit.coordinates(
+      coordinates: points,
+      padding: const EdgeInsets.fromLTRB(32, 72, 32, 32),
+      minZoom: 17.6, // assez près pour voir les pastilles
+      maxZoom: 19,
+    ));
+  }
+
+  void _ouvrirFicheGroupe(GroupeCarte g) {
+    final tarif = switch ((g.tarifMin, g.tarifMax)) {
+      (final a?, final b?) when a != b => '${euros(a)} à ${euros(b)} / h',
+      (final a?, _) => '${euros(a)} / h',
+      _ => null,
+    };
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (contexteFiche) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(g.estParking ? Icons.local_parking : Icons.add_road, color: Colors.blue.shade700),
+                const SizedBox(width: 8),
+                Expanded(child: Text(g.nom, style: Theme.of(context).textTheme.titleLarge)),
+              ]),
+              const SizedBox(height: 4),
+              Text(g.estParking ? 'Parking' : 'Stationnement dans la rue'),
+              if (g.adresse != null) Text(g.adresse!),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(
+                    avatar: Icon(g.libres > 0 ? Icons.check_circle : Icons.block,
+                        color: g.libres > 0 ? Colors.green : Colors.red),
+                    label: Text('${g.libres} libre(s) sur ${g.places}'),
+                  ),
+                  if (g.pmr > 0) Chip(avatar: const Icon(Icons.accessible), label: Text('${g.pmr} PMR')),
+                  if (g.elec > 0) Chip(avatar: const Icon(Icons.bolt), label: Text('${g.elec} électrique(s)')),
+                  if (tarif != null) Chip(label: Text(tarif)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.zoom_in),
+                  label: const Text('Voir les places'),
+                  onPressed: () {
+                    Navigator.pop(contexteFiche);
+                    _voirGroupe(g);
                   },
                 ),
               ),
@@ -287,10 +505,17 @@ class _CarteReellePageState extends State<CarteReellePage> {
               onTap: _toucherCarte,
               onPositionChanged: (camera, _) {
                 final palier = palierPour(camera.zoom);
+                final cran = cranPour(camera.zoom);
                 if (palier != _palier) {
                   setState(() {
                     _palier = palier;
+                    _cran = cran;
                     _preparerDessin();
+                  });
+                } else if (palier == 0 && cran != _cran) {
+                  setState(() {
+                    _cran = cran;
+                    _preparerReperes();
                   });
                 }
               },
@@ -300,12 +525,15 @@ class _CarteReellePageState extends State<CarteReellePage> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.client7360',
               ),
-              // De loin : toutes les places peintes d'un coup (rapide) ;
-              // de près : des pastilles touchables, seules celles à l'écran sont construites
-              if (_palier == 0)
-                _CouchePoints(libres: _libresProjetees, occupees: _occupeesProjetees)
-              else
-                MarkerLayer(markers: _pastilles),
+              // Contours des parkings, et de loin : toutes les places et un repère par parking ou par rue,
+              // peints d'un coup (rapide) ; de près : des pastilles touchables, seules celles à l'écran sont construites
+              _CoucheDessin(
+                contours: _contoursProjetes,
+                libres: _palier == 0 ? _libresProjetees : const [],
+                occupees: _palier == 0 ? _occupeesProjetees : const [],
+                reperes: [for (final g in _reperes) ?_dessins[g.nom]],
+              ),
+              if (_palier != 0) MarkerLayer(markers: _pastilles),
               const RichAttributionWidget(
                 attributions: [TextSourceAttribution('OpenStreetMap contributors')],
               ),
@@ -327,7 +555,8 @@ class _CarteReellePageState extends State<CarteReellePage> {
                       ? const SizedBox.square(
                           dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : Text(_erreur ??
-                          '${_places.length} place(s) sur la carte, dont $libres libre(s)'),
+                          '${_places.length} place(s), dont $libres libre(s)'
+                              '${_groupes.isEmpty ? '' : ' · ${_groupes.where((g) => g.estParking).length} parkings'}'),
                 ),
               ),
             ),
@@ -348,27 +577,101 @@ Offset projeter(LatLng p) {
   );
 }
 
-/// De loin : toutes les places peintes d'un coup, deux appels de dessin par couleur.
-/// Bien plus léger que des centaines de widgets (mesuré : la carte restait fluide).
-class _CouchePoints extends StatelessWidget {
-  const _CouchePoints({required this.libres, required this.occupees});
+/// Repère d'un groupe vu de loin : « P » pour un parking, une route pour une rue, et ses places libres.
+/// Les textes sont mis en page une seule fois par chargement ; la carte les peint ensuite à chaque image.
+/// Pas de détecteur de toucher : c'est la carte qui sait quel repère a été touché (_toucherCarte).
+class _DessinRepere {
+  _DessinRepere(GroupeCarte g)
+      : position = projeter(g.position),
+        _bord = Paint()
+          ..color = g.estParking ? Colors.blue.shade700 : Colors.blueGrey.shade500
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+        _rond = Paint()..color = g.estParking ? Colors.blue.shade700 : Colors.blueGrey.shade500,
+        _symbole = TextPainter(
+          textDirection: TextDirection.ltr,
+          text: g.estParking
+              ? const TextSpan(
+                  text: 'P', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
+              : TextSpan(
+                  text: String.fromCharCode(Icons.add_road.codePoint),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontFamily: Icons.add_road.fontFamily,
+                      package: Icons.add_road.fontPackage)),
+        )..layout(),
+        _texte = TextPainter(
+          textDirection: TextDirection.ltr,
+          text: TextSpan(
+            text: '${g.libres}/${g.places}',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: g.libres > 0 ? Colors.green.shade800 : Colors.red.shade700,
+            ),
+          ),
+        )..layout();
 
-  final List<Offset> libres, occupees; // positions au zoom 0, voir projeter()
+  final Offset position; // au zoom 0, voir projeter()
+  final Paint _bord, _rond;
+  final TextPainter _symbole, _texte;
+
+  static final _fond = Paint()..color = Colors.white;
+  static final _ombre = Paint()..color = Colors.black.withValues(alpha: 0.18);
+
+  void dispose() {
+    _symbole.dispose();
+    _texte.dispose();
+  }
+
+  void peindre(Canvas canvas, Offset centre) {
+    final cadre = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: centre, width: 2 + 18 + 4 + _texte.width + 7, height: 24),
+        const Radius.circular(12));
+    canvas.drawRRect(cadre.inflate(1.5).shift(const Offset(0, 1)), _ombre);
+    canvas.drawRRect(cadre, _fond);
+    canvas.drawRRect(cadre, _bord);
+    final rond = Offset(cadre.left + 2 + 9, centre.dy);
+    canvas.drawCircle(rond, 9, _rond);
+    _symbole.paint(canvas, rond - Offset(_symbole.width / 2, _symbole.height / 2));
+    _texte.paint(canvas, Offset(cadre.left + 2 + 18 + 4, centre.dy - _texte.height / 2));
+  }
+}
+
+/// Contours des parkings, puis (de loin) toutes les places et les repères de groupe, peints d'un coup.
+/// Bien plus léger que des centaines de widgets (mesuré : la carte restait fluide).
+class _CoucheDessin extends StatelessWidget {
+  const _CoucheDessin({
+    required this.contours,
+    required this.libres,
+    required this.occupees,
+    required this.reperes,
+  });
+
+  final List<List<Offset>> contours; // positions au zoom 0, voir projeter()
+  final List<Offset> libres, occupees;
+  final List<_DessinRepere> reperes;
 
   @override
   Widget build(BuildContext context) {
     final camera = MapCamera.of(context);
     return MobileLayerTransformer(
-      child: CustomPaint(size: Size.infinite, painter: _PeintrePoints(camera, libres, occupees)),
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _PeintreCarte(camera, contours, libres, occupees, reperes),
+      ),
     );
   }
 }
 
-class _PeintrePoints extends CustomPainter {
-  _PeintrePoints(this.camera, this.libres, this.occupees);
+class _PeintreCarte extends CustomPainter {
+  _PeintreCarte(this.camera, this.contours, this.libres, this.occupees, this.reperes);
 
   final MapCamera camera;
+  final List<List<Offset>> contours;
   final List<Offset> libres, occupees;
+  final List<_DessinRepere> reperes;
 
   static Paint _crayon(Color c, double epaisseur) => Paint()
     ..color = c
@@ -377,30 +680,40 @@ class _PeintrePoints extends CustomPainter {
   static final _contour = _crayon(Colors.white, 9);
   static final _vert = _crayon(Colors.green.shade600, 7);
   static final _rouge = _crayon(Colors.red.shade600, 7);
-
-  List<Offset> _aLEcran(List<Offset> base, Size size) {
-    final echelle = math.pow(2, camera.zoom).toDouble();
-    final origine = camera.pixelOrigin;
-    return [
-      for (final b in base)
-        if (b.dx * echelle - origine.dx > -10 &&
-            b.dy * echelle - origine.dy > -10 &&
-            b.dx * echelle - origine.dx < size.width + 10 &&
-            b.dy * echelle - origine.dy < size.height + 10)
-          b * echelle - origine,
-    ];
-  }
+  static final _fondParking = Paint()..color = Colors.blue.withValues(alpha: 0.10);
+  static final _bordParking = Paint()
+    ..color = Colors.blue.shade700
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final l = _aLEcran(libres, size);
-    final o = _aLEcran(occupees, size);
+    final echelle = math.pow(2, camera.zoom).toDouble();
+    final origine = camera.pixelOrigin;
+    final ecran = (Offset.zero & size).inflate(10);
+    Offset aLEcran(Offset b) => b * echelle - origine;
+
+    for (final c in contours) {
+      final chemin = Path()..addPolygon([for (final b in c) aLEcran(b)], true);
+      if (!chemin.getBounds().overlaps(ecran)) continue;
+      canvas.drawPath(chemin, _fondParking);
+      canvas.drawPath(chemin, _bordParking);
+    }
+
+    final l = [for (final b in libres) if (ecran.contains(aLEcran(b))) aLEcran(b)];
+    final o = [for (final b in occupees) if (ecran.contains(aLEcran(b))) aLEcran(b)];
     canvas.drawPoints(PointMode.points, l, _contour);
     canvas.drawPoints(PointMode.points, o, _contour);
     canvas.drawPoints(PointMode.points, l, _vert);
     canvas.drawPoints(PointMode.points, o, _rouge);
+
+    final zoneReperes = ecran.inflate(50);
+    for (final r in reperes) {
+      final c = aLEcran(r.position);
+      if (zoneReperes.contains(c)) r.peindre(canvas, c);
+    }
   }
 
   @override
-  bool shouldRepaint(_PeintrePoints ancien) => true;
+  bool shouldRepaint(_PeintreCarte ancien) => true;
 }
