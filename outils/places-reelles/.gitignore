@@ -1,0 +1,6 @@
+cache/
+*.pt
+apercu.html
+__pycache__/
+# étape 1 refaite en quelques secondes ; places_yolo.json est gardé (l étape 2 demande YOLO)
+places_osm.json

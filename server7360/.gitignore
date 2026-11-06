@@ -1,0 +1,5 @@
+# Bases SQLite créées par le serveur au démarrage (DATA_DIR=./data) : chacun a la sienne
+data/
+# Fichiers compilés de Python
+__pycache__/
+*.pyc
