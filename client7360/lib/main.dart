@@ -7,7 +7,9 @@ import 'exemple_de_page.dart';
 import 'parking_map_page.dart';
 import 'ecran_daccueil.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ParkingService.chargerAdresseEnregistree(); // adresse choisie dans les Réglages
   runApp(const MyApp());
 }
 

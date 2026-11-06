@@ -17,20 +17,16 @@ Tant que le backend n'est pas prêt (ou injoignable), la page affiche une
 
 ## Adresse du serveur
 
-L'URL est choisie automatiquement :
+L'URL (`ParkingService.baseUrl`, utilisée par toutes les pages) est choisie dans cet ordre :
 
-| Contexte | URL utilisée |
+| Priorité | URL utilisée |
 |---|---|
-| Émulateur Android | `http://10.0.2.2:8000` (le PC vu depuis l'émulateur) |
-| Autres (web, bureau, iOS simulateur) | `http://127.0.0.1:8000` |
+| 1 | `--dart-define=API_URL=http://192.168.1.20:8000` au lancement ou à la construction |
+| 2 | l'adresse enregistrée dans Réglages (si le test de connexion a réussi ; vide = par défaut) |
+| 3 | sur le web : la machine qui sert la page, port 8000 |
+| 4 | émulateur Android : `http://10.0.2.2:8000` (le PC vu depuis l'émulateur) ; sinon `http://127.0.0.1:8000` |
 
-Pour la changer sans toucher au code :
-
-```bash
-flutter run --dart-define=API_URL=http://192.168.1.20:8000
-```
-
-Sur un vrai téléphone, utilise l'adresse IP du PC sur le réseau local.
+Sur un vrai téléphone, utilise l'adresse IP du PC sur le réseau local (dans Réglages ou avec `--dart-define`).
 
 ## Contrat avec le backend
 

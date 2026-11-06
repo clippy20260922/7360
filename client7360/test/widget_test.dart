@@ -11,20 +11,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:client7360/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  // Le test d'exemple du modèle Flutter cherchait un compteur qui n'existe plus :
+  // on vérifie à la place que l'appli démarre sur l'écran d'accueil.
+  testWidgets("l'appli démarre sur l'écran d'accueil", (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Qui êtes-vous ?'), findsOneWidget);
+    expect(find.textContaining('Je suis usager'), findsOneWidget);
+    expect(find.textContaining('Je suis agent'), findsOneWidget);
+    expect(find.byType(FilledButton), findsNWidgets(3)); // usager, agent, réglages
   });
 }

@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-// Adresse du serveur FastAPI (voir server7360)
-const String urlServeurZone = 'http://127.0.0.1:8000';
+import 'parking_map_page.dart' show ParkingService;
+
+// Adresse du serveur FastAPI (voir server7360), la même pour toute l'appli
+String get urlServeurZone => ParkingService.baseUrl;
 
 /// Page pour choisir une zone géographique (un rectangle entre deux latitudes
 /// et deux longitudes) et voir les places qui s'y trouvent.

@@ -40,6 +40,14 @@ Le volume `monserveur-data` garde les bases (contraventions comprises) quand le 
 
 L'espace agent n'accepte que les comptes de type `agent`.
 
+### Connexion
+
+`POST /token` (formulaire `username`, `password`) renvoie un jeton (`access_token`). Les routes qui
+demandent d'être connecté le lisent dans l'en-tête `Authorization: Bearer <jeton>` : chaque appareil
+a sa propre session (avant, le dernier connecté l'était pour tout le monde). Dans http://127.0.0.1:8000/docs,
+le bouton « Authorize » fait la connexion. Les sessions sont gardées en mémoire : après un redémarrage
+du serveur, l'appli se reconnecte toute seule.
+
 
 # client7360
 
@@ -157,10 +165,12 @@ flutter pub get
 flutter run                    # puis choisir l'appareil (windows, chrome, émulateur…)
 ```
 
-L'adresse du serveur est choisie automatiquement : `http://127.0.0.1:8000` (Windows, navigateur…) ou `http://10.0.2.2:8000` (émulateur Android). Pour un téléphone réel ou un autre PC :
+L'adresse du serveur est choisie dans cet ordre :
 
-```bash
-flutter run --dart-define=API_URL=http://192.168.1.20:8000
-```
+1. `flutter run --dart-define=API_URL=http://192.168.1.20:8000` (ou `flutter build apk --dart-define=…`) ;
+2. l'adresse enregistrée dans **Réglages** (écran d'accueil), gardée seulement si le test de connexion réussit ;
+3. sur le web : la machine qui sert la page, port 8000 (l'appli ouverte depuis un autre PC trouve donc le serveur) ;
+4. `http://10.0.2.2:8000` sur l'émulateur Android, sinon `http://127.0.0.1:8000`.
 
-(adresse IP du PC qui fait tourner le serveur ; le pare-feu doit autoriser le port 8000).
+Pour un téléphone réel : l'adresse IP du PC qui fait tourner le serveur, lancé avec `--host 0.0.0.0`
+(le pare-feu doit autoriser le port 8000).

@@ -181,10 +181,14 @@ class AgentService {
   /// Identifiant de l'agent connecté (null = pas connecté).
   static String? agentId;
 
-  // Gardé en mémoire le temps de la session : le serveur retient « qui est
-  // connecté » en un seul exemplaire, donc s'il redémarre (ou si quelqu'un
-  // d'autre se connecte) on se reconnecte tout seul.
+  // Gardé en mémoire le temps de la session : si le serveur redémarre, il
+  // oublie les jetons, et on se reconnecte tout seul.
   static String? _password;
+
+  /// Jeton reçu à la connexion, renvoyé avec chaque requête d'agent.
+  static String? _jeton;
+  static Map<String, String> get _auth =>
+      {if (_jeton != null) 'Authorization': 'Bearer $_jeton'};
 
   /// Écart entre l'horloge du serveur et celle de l'appareil.
   static Duration _clockOffset = Duration.zero;
@@ -211,11 +215,13 @@ class AgentService {
     }
     agentId = username;
     _password = password;
+    _jeton = body['access_token'] as String?;
   }
 
   static void logout() {
     agentId = null;
     _password = null;
+    _jeton = null;
   }
 
   /// Message d'erreur lisible pour l'interface.
@@ -266,7 +272,7 @@ class AgentService {
     final mapRes = await http.get(Uri.parse('$_base/parking')).timeout(_timeout);
     final map = ParkingData.fromJson(_json(mapRes, 'Plan indisponible'));
 
-    final res = await _send(() => http.get(Uri.parse('$_base/agent/slots')));
+    final res = await _send(() => http.get(Uri.parse('$_base/agent/slots'), headers: _auth));
     final body = _json(res, 'Places indisponibles');
 
     final serverNow = parseServerTime(body['now'] as String?, keepOldDates: true);
@@ -286,7 +292,7 @@ class AgentService {
   /// GET /agent/infractions : la liste déroulante des contraventions.
   static Future<List<Offense>> fetchOffenses() async {
     final res =
-        await _send(() => http.get(Uri.parse('$_base/agent/infractions')));
+        await _send(() => http.get(Uri.parse('$_base/agent/infractions'), headers: _auth));
     final body = _json(res, 'Infractions indisponibles');
     return [
       for (final o in (body['data'] as List? ?? const []))
@@ -296,7 +302,7 @@ class AgentService {
 
   /// GET /agent/fines : les contraventions, les plus récentes d'abord.
   static Future<List<Fine>> fetchFines() async {
-    final res = await _send(() => http.get(Uri.parse('$_base/agent/fines')));
+    final res = await _send(() => http.get(Uri.parse('$_base/agent/fines'), headers: _auth));
     final body = _json(res, 'Contraventions indisponibles');
     return [
       for (final f in (body['data'] as List? ?? const []))
@@ -316,7 +322,7 @@ class AgentService {
     if (id == null) throw AgentApiException('Place invalide ($slotId)');
     final res = await _send(() => http.post(
           Uri.parse('$_base/agent/fines'),
-          headers: _jsonHeaders,
+          headers: {..._jsonHeaders, ..._auth},
           body: jsonEncode({
             'slot_id': id,
             'offense': offenseCode,

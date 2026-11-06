@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'parking_map_page.dart' show ParkingService;
+
 class ServerTestingPage extends StatefulWidget {
   const ServerTestingPage({super.key});
 
@@ -22,7 +24,7 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
     text: 'bonjouj',
   );
   final TextEditingController _serverUrlController = TextEditingController(
-    text: 'http://127.0.0.1:8000/data',
+    text: '${ParkingService.baseUrl}/data',
   );
 
   void _incrementCounter() {
@@ -89,7 +91,7 @@ class _ServerTestingPageState extends State<ServerTestingPage> {
   Future<void> chargerPlacesLibres() async {
     try {
       final response = await http.get(
-        Uri.parse('http://127.0.0.1:8000/data'),
+        Uri.parse('${ParkingService.baseUrl}/data'),
       );
 
       if (response.statusCode != 200) {

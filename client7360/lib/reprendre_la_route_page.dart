@@ -1,4 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import 'parking_map_page.dart' show ParkingService;
 import 'reservations_locales.dart';
 
 class ReprendreLaRoutePage extends StatefulWidget {
@@ -16,6 +21,25 @@ class _ReprendreLaRoutePageState extends State<ReprendreLaRoutePage> {
   void dispose() {
     _plaqueController.dispose();
     super.dispose();
+  }
+
+  /// PATCH /data/{id}/set_occupation : la place redevient libre sur le serveur.
+  /// Renvoie null si c'est fait, sinon le message d'erreur.
+  Future<String?> _libererSurLeServeur(String plaque, String placeId) async {
+    final url = Uri.parse('${ParkingService.baseUrl}/data/$placeId/set_occupation')
+        .replace(queryParameters: {'set_bool': 'false', 'vehicule': plaque});
+    try {
+      final res = await ParkingService.envoyer(
+          (entetes) => http.patch(url, headers: entetes));
+      if (res.statusCode == 200) return null;
+      try {
+        final detail = (jsonDecode(utf8.decode(res.bodyBytes)) as Map)['detail'];
+        if (detail is String) return detail;
+      } catch (_) {}
+      return 'erreur ${res.statusCode}';
+    } catch (_) {
+      return 'serveur injoignable';
+    }
   }
 
   void _rechercherReservation() {
@@ -56,11 +80,23 @@ class _ReprendreLaRoutePageState extends State<ReprendreLaRoutePage> {
             child: const Text('Annuler'),
             ),
             FilledButton(
-            onPressed: () {
+            onPressed: () async {
+                Navigator.pop(dialogContext);
+
+                // Place payée sur le serveur : on la libère d'abord là-bas
+                if (ReservationsLocales.estSurLeServeur(plaque)) {
+                  final erreur = await _libererSurLeServeur(plaque, placeId);
+                  if (!mounted) return;
+                  if (erreur != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Départ non enregistré : $erreur')),
+                    );
+                    return;
+                  }
+                }
+
                 ReservationsLocales.liberer(plaque);
                 ReservationsLocales.marquerPlaceLiberee(placeId);
-
-                Navigator.pop(dialogContext);
 
                 ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(

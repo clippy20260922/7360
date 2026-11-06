@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'parking_map_page.dart' show ParkingService;
+import 'reservations_locales.dart';
 
 /// Page pour payer une place (SCRUM-13) : on se connecte, on choisit un de
 /// ses véhicules et une durée, le serveur donne le prix puis enregistre le
@@ -44,7 +45,7 @@ class _PaiementPageState extends State<PaiementPage> {
   @override
   void initState() {
     super.initState();
-    _demanderPrix();
+    _reprendreSession();
   }
 
   @override
@@ -126,41 +127,70 @@ class _PaiementPageState extends State<PaiementPage> {
     }
     setState(() => _occupe = true);
     try {
-      final login = await http.post(
-        Uri.parse('$_base/token'),
-        body: {'username': identifiant, 'password': motDePasse},
-      ).timeout(const Duration(seconds: 10));
+      // Le jeton reçu est gardé par ParkingService pour les autres pages (départ)
+      final accepte = await ParkingService.connecter(identifiant, motDePasse);
       if (!mounted) return;
-      if (login.statusCode != 200) {
+      if (!accepte) {
         _afficher('Identifiant ou mot de passe incorrect', erreur: true);
         return;
       }
-
-      // Véhicules de l'utilisateur : [plaque, propriétaire, type, électrique, place actuelle]
-      final reponse = await http
-          .get(Uri.parse('$_base/user/${Uri.encodeComponent(identifiant)}'))
-          .timeout(const Duration(seconds: 10));
-      if (!mounted) return;
-      final data = _lireJson(reponse);
-      final vehicules = (data is Map ? data['data'] as List<dynamic>? : null) ?? [];
-      final compatibles = [
-        for (final v in vehicules)
-          if (v is List && (_typePlace == null || v[2] == _typePlace)) v[0] as String,
-      ];
-      setState(() {
-        _utilisateur = identifiant;
-        _plaques = compatibles;
-        _plaque = compatibles.isEmpty ? null : compatibles.first;
-        _motDePasseController.clear();
-      });
-      _afficher(compatibles.isEmpty
-          ? 'Aucun de vos véhicules ne correspond à cette place'
-          : '');
+      _motDePasseController.clear();
+      await _chargerVehicules(identifiant);
     } catch (_) {
       if (mounted) _afficher('Serveur injoignable', erreur: true);
     } finally {
       if (mounted) setState(() => _occupe = false);
     }
+  }
+
+  // Déjà connecté sur une autre place : on reprend la session
+  Future<void> _reprendreSession() async {
+    await _demanderPrix(); // donne le type de la place, pour filtrer les véhicules
+    final usager = ParkingService.usager;
+    if (!mounted || usager == null || ParkingService.jeton == null) return;
+    try {
+      await _chargerVehicules(usager);
+    } catch (_) {
+      if (mounted) _afficher('Serveur injoignable', erreur: true);
+    }
+  }
+
+  void _changerDeCompte() {
+    ParkingService.jeton = null;
+    ParkingService.usager = null;
+    setState(() {
+      _utilisateur = null;
+      _plaques = [];
+      _plaque = null;
+    });
+    _afficher('');
+  }
+
+  Future<void> _chargerVehicules(String identifiant) async {
+    // Véhicules de l'utilisateur : [plaque, propriétaire, type, électrique, place actuelle]
+    final reponse = await ParkingService.envoyer((entetes) => http.get(
+        Uri.parse('$_base/user/${Uri.encodeComponent(identifiant)}'),
+        headers: entetes));
+    if (!mounted) return;
+    final data = _lireJson(reponse);
+    if (reponse.statusCode != 200) {
+      _changerDeCompte(); // session perdue : on redemande l'identifiant
+      _afficher('Reconnectez-vous (${_texteErreur(reponse, data)})', erreur: true);
+      return;
+    }
+    final vehicules = (data is Map ? data['data'] as List<dynamic>? : null) ?? [];
+    final compatibles = [
+      for (final v in vehicules)
+        if (v is List && (_typePlace == null || v[2] == _typePlace)) v[0] as String,
+    ];
+    setState(() {
+      _utilisateur = identifiant;
+      _plaques = compatibles;
+      _plaque = compatibles.isEmpty ? null : compatibles.first;
+    });
+    _afficher(compatibles.isEmpty
+        ? 'Aucun de vos véhicules ne correspond à cette place'
+        : '');
   }
 
   Future<void> _payer() async {
@@ -170,12 +200,15 @@ class _PaiementPageState extends State<PaiementPage> {
     final url = Uri.parse('$_base/data/${widget.idPlace}/payer')
         .replace(queryParameters: {'plaque': plaque, 'duree': '$_duree'});
     try {
-      final response = await http.post(url).timeout(const Duration(seconds: 10));
+      final response = await ParkingService.envoyer((entetes) => http.post(url, headers: entetes));
       if (!mounted) return;
       final data = _lireJson(response);
       if (response.statusCode == 200 && data is Map) {
         final prix = (data['prix'] as num).toDouble();
         final fin = _heureLocale(data['fin_occupation'] as String);
+        // Pour « Reprendre la route » : la plaque et la place, à libérer sur le serveur
+        ReservationsLocales.effacerLiberation('${widget.idPlace}');
+        ReservationsLocales.reserverSurLeServeur(plaque, '${widget.idPlace}');
         setState(() => _paye = true);
         _afficher(data['prolongation'] == true
             ? 'Stationnement prolongé (${_texteEuros(prix)}) : '
@@ -235,6 +268,10 @@ class _PaiementPageState extends State<PaiementPage> {
             const Icon(Icons.check_circle, color: Colors.green),
             const SizedBox(width: 8),
             Expanded(child: Text('Connecté : $_utilisateur')),
+            TextButton(
+              onPressed: _occupe ? null : _changerDeCompte,
+              child: const Text('Changer de compte'),
+            ),
           ],
         ),
         const SizedBox(height: 16),
