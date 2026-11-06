@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
 import math
+import secrets
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 # Dossier des bases de données : /data par défaut (conteneur), modifiable pour
@@ -26,7 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Simple SQLite API", lifespan=lifespan)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)  #jeton facultatif : chaque route vérifie la connexion
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,7 +49,24 @@ class User():
         self.username = ""
         self.type = "user"
         self.vehicule = None
-current_user = User()
+
+#Chaque appareil reçoit un jeton à la connexion (POST /token) et le renvoie avec chaque requête
+#(en-tête « Authorization: Bearer <jeton> »). current_user désigne l'utilisateur de la requête en
+#cours ; avant, c'était le dernier connecté, pour tous les appareils. Les sessions sont en mémoire :
+#après un redémarrage du serveur, il faut se reconnecter.
+sessions: dict[str, User] = {}
+utilisateur_de_la_requete: ContextVar[User] = ContextVar("utilisateur_de_la_requete")
+
+class UtilisateurCourant():
+    def __getattr__(self, nom):
+        return getattr(utilisateur_de_la_requete.get(User()), nom)
+current_user = UtilisateurCourant()
+
+async def identifier(jeton: Annotated[str | None, Depends(oauth2_scheme)]) -> None:
+    #Appelée avant chaque route (async : la valeur suit la requête jusque dans la route)
+    utilisateur_de_la_requete.set(sessions.get(jeton, User()) if jeton else User())
+
+app.router.dependencies.append(Depends(identifier))
 
 ### Petits outils communs
 
@@ -496,6 +515,8 @@ async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int =
         raise HTTPException(status_code=400,detail="Authentifiez-vous pour avoir accès à cette fonctionnalité")
     
     conn = sqlite3.connect(DB_PATH)
+    if conn.execute("SELECT slot_id FROM slot_table WHERE slot_id=?",(id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
     #Cas utilisateur (arrive ou part)
     if current_user.type == "user":
         #Prendre la place
@@ -515,7 +536,7 @@ async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int =
                 
                 #Vérifier que la place n'est pas prise
                 data = conn.execute("SELECT slot_occupied FROM slot_table WHERE slot_id=?",(id,)).fetchone()
-                if data==1:
+                if data[0]:  #fetchone() renvoie une ligne (un tuple), pas la valeur seule
                     raise HTTPException(status_code=400,detail="Cette place est occupée. Si ce n'est pas le cas, veuillez contacter le support")
 
                 #Enregistrer les informations de la place et du véhicule
@@ -524,14 +545,20 @@ async def set_slot_occupied(id:int, set_bool : bool, occupation_time_min : int =
 
         #Libérer la place
         else:
-            conn.execute("UPDATE slot_table SET slot_occupied=? AND fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
+            #Le véhicule doit être à l'utilisateur et garé sur cette place
+            data = conn.execute("SELECT proprietaire, current_slot FROM vehicle_table WHERE no_plaque=?",(vehicule,)).fetchone()
+            if data is None or data[0] != current_user.username:
+                raise HTTPException(status_code=403,detail="Ce véhicule n'est pas enregistré à votre nom")
+            if data[1] != id:
+                raise HTTPException(status_code=400,detail="Ce véhicule n'est pas garé sur cette place")
+            conn.execute("UPDATE slot_table SET slot_occupied=?, fin_occupation='1900-01-01 00:00:00' WHERE slot_id = ?;", (set_bool,id,))
             conn.execute("UPDATE vehicle_table SET current_slot=NULL WHERE no_plaque=?", (vehicule,))
         
     #Cas agent (place mal renseignée)
     elif current_user.type == "agent":
         #Signaler une place prise ou libre non-rensignée
         if set_bool and occupation_time_min!=-1:
-                conn.execute("UPDATE slot_table SET slot_occupied=? AND fin_occupation=DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool,"+"+str(occupation_time_min)+" minutes",id,))
+                conn.execute("UPDATE slot_table SET slot_occupied=?, fin_occupation=DATETIME(CURRENT_TIMESTAMP,?) WHERE slot_id = ?;", (set_bool,"+"+str(occupation_time_min)+" minutes",id,))
         else:
                 conn.execute("UPDATE slot_table SET slot_occupied=? WHERE slot_id = ?;", (set_bool,id,))
 
@@ -815,12 +842,14 @@ def create_agent_fine(payload: FinePayload) -> dict:
 
 ### Login
 
-def set_user_info(username:str):
-    current_user.username = username
+def set_user_info(username:str) -> User:
+    user = User()
+    user.username = username
     conn = sqlite3.connect(USER_DB_PATH)
     data = conn.execute("SELECT type FROM user_table WHERE username = ?", (username,)).fetchone()
-    current_user.type = data[0]
+    user.type = data[0]
     conn.close()
+    return user
 
 @app.post("/token")
 async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
@@ -833,8 +862,10 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
      hashed_intput = hash(form_data.password)
      if hashed_mdp != hashed_intput:
          raise HTTPException(status_code=400, detail="username ou mot de passe erroné")
-     set_user_info(form_data.username)
-     return {"username":data[0], "type":current_user.type}
+     user = set_user_info(form_data.username)
+     jeton = secrets.token_urlsafe(24)
+     sessions[jeton] = user
+     return {"username":data[0], "type":user.type, "access_token":jeton, "token_type":"bearer"}
 
 
 
