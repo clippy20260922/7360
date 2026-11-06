@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'parking_map_page.dart' show ParkingService;
 import 'reservations_locales.dart';
+import 'session_usager.dart';
 
 /// Page pour payer une place (SCRUM-13) : on se connecte, on choisit un de
 /// ses véhicules et une durée, le serveur donne le prix puis enregistre le
@@ -127,8 +128,8 @@ class _PaiementPageState extends State<PaiementPage> {
     }
     setState(() => _occupe = true);
     try {
-      // Le jeton reçu est gardé par ParkingService pour les autres pages (départ)
-      final accepte = await ParkingService.connecter(identifiant, motDePasse);
+      // Le jeton reçu est gardé par SessionUsager pour les autres pages (départ)
+      final accepte = await SessionUsager.connecter(identifiant, motDePasse);
       if (!mounted) return;
       if (!accepte) {
         _afficher('Identifiant ou mot de passe incorrect', erreur: true);
@@ -146,8 +147,8 @@ class _PaiementPageState extends State<PaiementPage> {
   // Déjà connecté sur une autre place : on reprend la session
   Future<void> _reprendreSession() async {
     await _demanderPrix(); // donne le type de la place, pour filtrer les véhicules
-    final usager = ParkingService.usager;
-    if (!mounted || usager == null || ParkingService.jeton == null) return;
+    final usager = SessionUsager.usager;
+    if (!mounted || usager == null || SessionUsager.jeton == null) return;
     try {
       await _chargerVehicules(usager);
     } catch (_) {
@@ -156,8 +157,7 @@ class _PaiementPageState extends State<PaiementPage> {
   }
 
   void _changerDeCompte() {
-    ParkingService.jeton = null;
-    ParkingService.usager = null;
+    SessionUsager.deconnecter();
     setState(() {
       _utilisateur = null;
       _plaques = [];
@@ -168,7 +168,7 @@ class _PaiementPageState extends State<PaiementPage> {
 
   Future<void> _chargerVehicules(String identifiant) async {
     // Véhicules de l'utilisateur : [plaque, propriétaire, type, électrique, place actuelle]
-    final reponse = await ParkingService.envoyer((entetes) => http.get(
+    final reponse = await SessionUsager.envoyer((entetes) => http.get(
         Uri.parse('$_base/user/${Uri.encodeComponent(identifiant)}'),
         headers: entetes));
     if (!mounted) return;
@@ -200,7 +200,7 @@ class _PaiementPageState extends State<PaiementPage> {
     final url = Uri.parse('$_base/data/${widget.idPlace}/payer')
         .replace(queryParameters: {'plaque': plaque, 'duree': '$_duree'});
     try {
-      final response = await ParkingService.envoyer((entetes) => http.post(url, headers: entetes));
+      final response = await SessionUsager.envoyer((entetes) => http.post(url, headers: entetes));
       if (!mounted) return;
       final data = _lireJson(response);
       if (response.statusCode == 200 && data is Map) {

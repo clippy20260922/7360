@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'parking_map_page.dart' show ParkingService;
 import 'reservations_locales.dart';
+import 'session_usager.dart';
 
 class ReprendreLaRoutePage extends StatefulWidget {
   const ReprendreLaRoutePage({super.key});
@@ -29,7 +30,7 @@ class _ReprendreLaRoutePageState extends State<ReprendreLaRoutePage> {
     final url = Uri.parse('${ParkingService.baseUrl}/data/$placeId/set_occupation')
         .replace(queryParameters: {'set_bool': 'false', 'vehicule': plaque});
     try {
-      final res = await ParkingService.envoyer(
+      final res = await SessionUsager.envoyer(
           (entetes) => http.patch(url, headers: entetes));
       if (res.statusCode == 200) return null;
       try {

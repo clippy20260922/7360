@@ -1,10 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'parking_map_page.dart' show ParkingService;
 
 class ParametresPage extends StatefulWidget {
   const ParametresPage({super.key});
@@ -34,16 +32,6 @@ class _ParametresPageState extends State<ParametresPage> {
     final address = _addressController.text.trim();
     final uri = Uri.tryParse(address);
 
-    // Champ vide : on revient à l'adresse par défaut
-    if (address.isEmpty) {
-      await ParkingService.enregistrerAdresse('');
-      setState(() {
-        _result = 'Adresse par défaut : ${ParkingService.baseUrl}';
-        _connectionSucceeded = true;
-      });
-      return;
-    }
-
     if (uri == null ||
         !['http', 'https'].contains(uri.scheme) ||
         uri.host.isEmpty) {
@@ -60,15 +48,24 @@ class _ParametresPageState extends State<ParametresPage> {
       _connectionSucceeded = null;
     });
 
-    // package:http plutôt que dart:io, qui ne marche pas sur le web
+    final client = HttpClient();
+
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 5));
-      final body = utf8.decode(response.bodyBytes);
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString('serverAddress', address);
+
+      final request = await client
+          .getUrl(uri)
+          .timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final body = await utf8.decoder.bind(response).join().timeout(
+        const Duration(seconds: 5),
+      );
 
       final succeeded = response.statusCode >= 200 &&
           response.statusCode < 300;
-      // L'adresse n'est gardée (et utilisée par toute l'appli) que si elle répond
-      if (succeeded) await ParkingService.enregistrerAdresse(address);
 
       setState(() {
         _connectionSucceeded = succeeded;
@@ -82,6 +79,7 @@ class _ParametresPageState extends State<ParametresPage> {
         _result = 'Échec de la connexion : $error';
       });
     } finally {
+      client.close(force: true);
       setState(() => _isTesting = false);
     }
   }
@@ -108,11 +106,10 @@ class _ParametresPageState extends State<ParametresPage> {
               TextField(
                 controller: _addressController,
                 keyboardType: TextInputType.url,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   labelText: 'Adresse du serveur',
-                  hintText: ParkingService.baseUrl,
-                  helperText: 'Vide = adresse par défaut',
+                  hintText: 'http://127.0.0.1:60000',
                 ),
               ),
               const SizedBox(height: 16),

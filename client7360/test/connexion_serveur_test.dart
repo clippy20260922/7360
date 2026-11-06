@@ -1,10 +1,10 @@
-// Adresse du serveur, jeton de connexion, place enregistrée puis libérée sur le serveur.
+// Jeton de connexion, place enregistrée puis libérée sur le serveur (SCRUM-61).
 import 'dart:convert';
 
 import 'package:client7360/paiement_page.dart';
-import 'package:client7360/parking_map_page.dart';
 import 'package:client7360/reprendre_la_route_page.dart';
 import 'package:client7360/reservations_locales.dart';
+import 'package:client7360/session_usager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -15,31 +15,6 @@ http.Response json(Object corps, [int code = 200]) => http.Response.bytes(
     headers: {'content-type': 'application/json'});
 
 void main() {
-  group('adresse du serveur', () {
-    String choisir({String envoyee = '', String? enregistree, bool web = false, bool android = false, String? page}) =>
-        ParkingService.choisirAdresse(
-            envoyee: envoyee, enregistree: enregistree, web: web, android: android,
-            page: page == null ? null : Uri.parse(page));
-
-    test('--dart-define=API_URL passe avant tout', () {
-      expect(choisir(envoyee: 'http://10.1.2.3:8000/', enregistree: 'http://x:1', web: true, page: 'http://y:8360/'),
-          'http://10.1.2.3:8000');
-    });
-    test("l'adresse des Réglages passe avant celle de la page", () {
-      expect(choisir(enregistree: ' http://192.168.1.20:8000 ', web: true, page: 'http://y:8360/'),
-          'http://192.168.1.20:8000');
-      expect(choisir(enregistree: '  ', android: true), 'http://10.0.2.2:8000');
-    });
-    test('sur le web : la machine qui sert la page, port 8000', () {
-      expect(choisir(web: true, page: 'http://100.111.128.15:8360/#/'), 'http://100.111.128.15:8000');
-      expect(choisir(web: true, page: 'http://127.0.0.1:8360/'), 'http://127.0.0.1:8000');
-    });
-    test('émulateur Android, sinon 127.0.0.1', () {
-      expect(choisir(android: true), 'http://10.0.2.2:8000');
-      expect(choisir(), 'http://127.0.0.1:8000');
-    });
-  });
-
   group('place payée puis libérée', () {
     late List<http.Request> requetes;
     late Map<String, http.Response Function(http.Request)> serveur;
@@ -51,9 +26,7 @@ void main() {
 
     setUp(() {
       requetes = [];
-      ParkingService.baseUrl = 'http://serveur:8000';
-      ParkingService.jeton = null;
-      ParkingService.usager = null;
+      SessionUsager.deconnecter();
       ReservationsLocales.liberer('QR345ST');
       ReservationsLocales.liberer('AB123CD');
     });
@@ -79,7 +52,7 @@ void main() {
         await tester.tap(find.text('Se connecter'));
         await tester.pumpAndSettle();
         expect(find.text('Connecté : ab123456'), findsOneWidget);
-        expect(ParkingService.jeton, 'J1');
+        expect(SessionUsager.jeton, 'J1');
 
         await tester.tap(find.text('Payer 1,60 €'));
         await tester.pumpAndSettle();
@@ -105,7 +78,7 @@ void main() {
     }
 
     testWidgets('le départ libère la place sur le serveur, avec le jeton', (tester) async {
-      ParkingService.jeton = 'J1';
+      SessionUsager.jeton = 'J1';
       ReservationsLocales.reserverSurLeServeur('AB123CD', '4');
       serveur = {'PATCH /data/4/set_occupation': (r) => json({'data': [4]})};
       await http.runWithClient(() => partir(tester, 'AB123CD'), () => client);
@@ -118,7 +91,7 @@ void main() {
     });
 
     testWidgets('refus du serveur : le message est affiché et la réservation gardée', (tester) async {
-      ParkingService.jeton = 'J1';
+      SessionUsager.jeton = 'J1';
       ReservationsLocales.reserverSurLeServeur('AB123CD', '4');
       serveur = {
         'PATCH /data/4/set_occupation': (r) => json({'detail': "Ce véhicule n'est pas garé sur cette place"}, 400),
@@ -138,7 +111,7 @@ void main() {
             : json({'detail': 'Authentifiez-vous pour avoir accès à cette fonctionnalité'}, 400),
       };
       await http.runWithClient(() async {
-        await ParkingService.connecter('ab123456', 'secret');
+        await SessionUsager.connecter('ab123456', 'secret');
         ReservationsLocales.reserverSurLeServeur('AB123CD', '4');
         jetonValide = 'J2'; // le serveur a redémarré
         await partir(tester, 'AB123CD');

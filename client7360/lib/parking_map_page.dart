@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'parking_map_view.dart';
 import 'informations_vehicule_page.dart';
@@ -17,97 +16,16 @@ import 'package:flutter/foundation.dart'
 // ───────────────────────── Accès backend ─────────────────────────
 
 class ParkingService {
-  /// URL du serveur (server7360), choisie dans cet ordre :
-  ///   1. au lancement : flutter run --dart-define=API_URL=http://192.168.1.20:8000
-  ///   2. l'adresse enregistrée dans les Réglages de l'appli ;
-  ///   3. sur le web : la machine qui sert la page, port 8000 ;
-  ///   4. l'émulateur Android : 10.0.2.2 ; sinon 127.0.0.1.
-  static String baseUrl = _resolveBaseUrl();
+  /// URL du serveur (server7360). Pour la changer sans toucher au code :
+  ///   flutter run --dart-define=API_URL=http://192.168.1.20:8000
+  static final String baseUrl = _resolveBaseUrl();
 
-  /// Jeton de l'usager connecté (POST /token), à renvoyer avec ses requêtes.
-  static String? jeton;
-  static String? usager;
-  static Map<String, String> get entetes =>
-      {if (jeton != null) 'Authorization': 'Bearer $jeton'};
-  // Gardé en mémoire le temps de la session, comme AgentService : si le serveur
-  // redémarre, il oublie les jetons, et on se reconnecte tout seul.
-  static String? _motDePasse;
-
-  /// POST /token : true si l'identifiant et le mot de passe sont acceptés.
-  static Future<bool> connecter(String identifiant, String motDePasse) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/token'),
-      body: {'username': identifiant, 'password': motDePasse},
-    ).timeout(const Duration(seconds: 10));
-    if (res.statusCode != 200) return false;
-    final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    jeton = data['access_token'] as String?;
-    usager = identifiant;
-    _motDePasse = motDePasse;
-    return true;
-  }
-
-  /// Requête de l'usager connecté, avec son jeton ; si le serveur ne le
-  /// reconnaît plus, on se reconnecte puis on réessaie une fois.
-  static Future<http.Response> envoyer(
-      Future<http.Response> Function(Map<String, String> entetes) requete) async {
-    var res = await requete(entetes).timeout(const Duration(seconds: 10));
-    final id = usager, mdp = _motDePasse;
-    final oublie = res.statusCode == 401 ||
-        (res.statusCode == 400 && utf8.decode(res.bodyBytes).contains('Authentifiez'));
-    if (oublie && id != null && mdp != null && await connecter(id, mdp)) {
-      res = await requete(entetes).timeout(const Duration(seconds: 10));
-    }
-    return res;
-  }
-
-  static const _cleAdresse = 'serverAddress'; // la clé de ParametresPage
-
-  /// À appeler au démarrage (main) : reprend l'adresse des Réglages.
-  static Future<void> chargerAdresseEnregistree() async {
-    try {
-      final preferences = await SharedPreferences.getInstance();
-      baseUrl = _resolveBaseUrl(preferences.getString(_cleAdresse));
-    } catch (_) {} // pas de stockage : on garde l'adresse par défaut
-  }
-
-  /// Change l'adresse (Réglages) ; une adresse vide revient à celle par défaut.
-  static Future<void> enregistrerAdresse(String adresse) async {
-    final preferences = await SharedPreferences.getInstance();
-    if (adresse.isEmpty) {
-      await preferences.remove(_cleAdresse);
-    } else {
-      await preferences.setString(_cleAdresse, adresse);
-    }
-    baseUrl = _resolveBaseUrl(adresse);
-  }
-
-  static String _resolveBaseUrl([String? enregistree]) => choisirAdresse(
-        envoyee: const String.fromEnvironment('API_URL'),
-        enregistree: enregistree,
-        web: kIsWeb,
-        android: defaultTargetPlatform == TargetPlatform.android,
-        page: kIsWeb ? Uri.base : null,
-      );
-
-  static String choisirAdresse({
-    required String envoyee,
-    String? enregistree,
-    required bool web,
-    required bool android,
-    Uri? page,
-  }) {
-    String sansSlash(String a) => a.endsWith('/') ? a.substring(0, a.length - 1) : a;
-    if (envoyee.isNotEmpty) return sansSlash(envoyee);
-    if (enregistree != null && enregistree.trim().isNotEmpty) return sansSlash(enregistree.trim());
-    // Sur le web, 127.0.0.1 désigne l'appareil qui affiche la page : depuis un
-    // autre PC ou un téléphone, le serveur est sur la machine qui sert la page.
-    if (web && page != null && page.host.isNotEmpty && page.scheme.startsWith('http')) {
-      return '${page.scheme}://${page.host}:8000';
-    }
+  static String _resolveBaseUrl() {
+    const fromEnv = String.fromEnvironment('API_URL');
+    if (fromEnv.isNotEmpty) return fromEnv;
     // Sur l'émulateur Android, 127.0.0.1 désigne l'émulateur lui-même,
     // pas le PC : 10.0.2.2 est l'adresse du PC vu depuis l'émulateur.
-    if (!web && android) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8000';
     }
     return 'http://127.0.0.1:8000';
