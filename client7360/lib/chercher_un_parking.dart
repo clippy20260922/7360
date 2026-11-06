@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'carte_reelle_page.dart';
 import 'parking_map_page.dart';
 import 'reprendre_la_route_page.dart';
 
@@ -53,6 +54,25 @@ class ChercherUnParking extends StatelessWidget {
                 child: const Text('Cliquer ici pour ouvrir la carte'),
               ),
             ),
+            const SizedBox(height: 12),
+            // Vraie carte OpenStreetMap (SCRUM-52)
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CarteReellePage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.map),
+                label: const Text('Vraie carte (OpenStreetMap)'),
+              ),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               height: 48,

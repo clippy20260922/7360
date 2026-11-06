@@ -937,3 +937,33 @@ def payer_place(id: int, plaque: str, duree: Duree) -> dict:
                 "fin_occupation": fin, "prolongation": prolongation}
     finally:
         conn.close()
+
+
+
+########## Vraie carte OpenStreetMap (SCRUM-52) ##########
+
+### Places avec leurs coordonnées GPS, par nom de colonne (la carte ne dépend pas de l'ordre des colonnes)
+
+@app.get("/data/carte")
+def get_places_carte() -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT slot_id, slot_adresse, slot_ville, slot_lat, slot_long, slot_type, slot_pmr, slot_elec, "\
+        "parking, slot_tarif, slot_occupied FROM slot_table ORDER BY slot_id"
+    ).fetchall()
+    conn.close()
+    data = [{
+        "id": r["slot_id"],
+        "lat": r["slot_lat"],
+        "long": r["slot_long"],
+        "type": r["slot_type"],
+        "pmr": bool(r["slot_pmr"]),
+        "elec": bool(r["slot_elec"]),
+        "adresse": r["slot_adresse"],
+        "ville": r["slot_ville"],
+        "parking": r["parking"],
+        "tarif": r["slot_tarif"],
+        "occupee": bool(r["slot_occupied"]),
+    } for r in rows]
+    return {"N": len(data), "data": data}
