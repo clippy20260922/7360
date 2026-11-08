@@ -98,6 +98,7 @@ class SlotInfo {
         pmr: j['pmr'] == true,
         elec: j['elec'] == true,
         occupied: j['occupied'] == true,
+        reserved: j['reserved'] == true,
         address: j['address'] as String?,
         city: j['city'] as String?,
         parking: j['parking'] as String?,
@@ -119,6 +120,10 @@ class SlotInfo {
 
   /// Fin du stationnement payé, en UTC (null = aucun paiement).
   final DateTime? endsAt;
+
+  /// Catégorie de place : standard, pmr, elec ou moto.
+  String get category =>
+      pmr ? 'pmr' : (type == 'moto' ? 'moto' : (elec ? 'elec' : 'standard'));
 
   String get typeLabel => type == 'moto' ? 'Moto' : 'Voiture';
 

@@ -125,14 +125,14 @@ class _AgentShellState extends State<AgentShell> {
               if (c.loading) {
                 return const Center(child: CircularProgressIndicator());
               }
-              return _ErrorState(
+              return ErrorState(
                 message: c.error ?? 'Erreur inconnue',
                 onRetry: c.refresh,
               );
             }
             return Column(
               children: [
-                if (c.error != null) _ConnectionBanner(message: c.error!),
+                if (c.error != null) ConnectionBanner(message: c.error!),
                 Expanded(
                   // IndexedStack : la carte garde son zoom / sa rotation
                   // quand on passe sur un autre onglet.
@@ -197,8 +197,8 @@ class _AgentShellState extends State<AgentShell> {
 
 /// Bandeau affiché quand un rafraîchissement échoue : les dernières données
 /// restent à l'écran.
-class _ConnectionBanner extends StatelessWidget {
-  const _ConnectionBanner({required this.message});
+class ConnectionBanner extends StatelessWidget {
+  const ConnectionBanner({required this.message});
 
   final String message;
 
@@ -231,8 +231,8 @@ class _ConnectionBanner extends StatelessWidget {
 }
 
 /// Écran affiché quand le tout premier chargement échoue.
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
+class ErrorState extends StatelessWidget {
+  const ErrorState({required this.message, required this.onRetry});
 
   final String message;
   final Future<void> Function() onRetry;

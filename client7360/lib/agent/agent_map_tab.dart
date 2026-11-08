@@ -42,7 +42,7 @@ class _AgentMapTabState extends State<AgentMapTab> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                child: _MapCard(
+                child: MapCard(
                   map: _map,
                   data: snap.map,
                   onSelected: (id) => setState(() => _selectedId = id),
@@ -63,6 +63,10 @@ class _AgentMapTabState extends State<AgentMapTab> {
                       ? const _EmptyPanel()
                       : _SpotPanel(
                           controller: widget.controller,
+                          lotSlots: [
+                            for (final s in snap.slots)
+                              if (s.parking == selected.id) s,
+                          ],
                           spot: selected,
                           info: snap.slotById(selected.id),
                           now: snap.fetchedAt,
@@ -79,8 +83,8 @@ class _AgentMapTabState extends State<AgentMapTab> {
 
 // ───────────────────────── Carte ─────────────────────────
 
-class _MapCard extends StatelessWidget {
-  const _MapCard({
+class MapCard extends StatelessWidget {
+  const MapCard({
     required this.map,
     required this.data,
     required this.onSelected,
@@ -125,13 +129,13 @@ class _MapCard extends StatelessWidget {
             right: 10,
             child: Column(
               children: [
-                _RoundButton(
+                MapRoundButton(
                   icon: Icons.my_location_rounded,
                   tooltip: 'Recentrer la vue',
                   onTap: map.resetView,
                 ),
                 const SizedBox(height: 8),
-                _RoundButton(
+                MapRoundButton(
                   icon: Icons.refresh_rounded,
                   tooltip: 'Actualiser',
                   onTap: onRefresh,
@@ -139,15 +143,15 @@ class _MapCard extends StatelessWidget {
               ],
             ),
           ),
-          const Positioned(left: 10, bottom: 10, child: _Legend()),
+          const Positioned(left: 10, bottom: 10, child: MapLegend()),
         ],
       ),
     );
   }
 }
 
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
+class MapRoundButton extends StatelessWidget {
+  const MapRoundButton({
     required this.icon,
     required this.tooltip,
     required this.onTap,
@@ -178,8 +182,8 @@ class _RoundButton extends StatelessWidget {
   }
 }
 
-class _Legend extends StatelessWidget {
-  const _Legend();
+class MapLegend extends StatelessWidget {
+  const MapLegend();
 
   @override
   Widget build(BuildContext context) {
@@ -254,12 +258,14 @@ class _EmptyPanel extends StatelessWidget {
 class _SpotPanel extends StatelessWidget {
   const _SpotPanel({
     required this.controller,
+    required this.lotSlots,
     required this.spot,
     required this.info,
     required this.now,
   });
 
   final AgentController controller;
+  final List<SlotInfo> lotSlots; // places du parking sélectionné
   final ParkingSpot spot;
   final SlotInfo? info;
   final DateTime now;
@@ -279,7 +285,7 @@ class _SpotPanel extends StatelessWidget {
           children: [
             _header(i),
             const SizedBox(height: 14),
-            if (spot.isLot) ..._lotBody() else ..._spotBody(i, compliance),
+            if (spot.isLot) ..._lotBody(lotSlots) else ..._spotBody(i, compliance),
           ],
         ),
       ),
@@ -336,16 +342,102 @@ class _SpotPanel extends StatelessWidget {
     );
   }
 
-  List<Widget> _lotBody() {
-    final full = spot.status == SpotStatus.occupied;
+  List<Widget> _lotBody(List<SlotInfo> places) {
+    final parked = places.where((p) => p.occupied).toList()
+      ..sort((a, b) {
+        final va = a.complianceAt(now).isViolation ? 0 : 1;
+        final vb = b.complianceAt(now).isViolation ? 0 : 1;
+        return va != vb ? va.compareTo(vb) : a.id.compareTo(b.id);
+      });
+    final reserved = places.where((p) => p.reserved).length;
+    final free = places.length - parked.length - reserved;
+    final violations =
+        parked.where((p) => p.complianceAt(now).isViolation).length;
+
+    // Catégories, dans un ordre fixe
+    const order = ['standard', 'pmr', 'elec', 'moto'];
+    final cats = <Widget>[];
+    for (final code in order) {
+      final inCat = places.where((p) => p.category == code).toList();
+      if (inCat.isEmpty) continue;
+      final catFree = inCat.where((p) => !p.occupied && !p.reserved).length;
+      cats.add(_AvailabilityRow(
+        code: code,
+        free: catFree,
+        total: inCat.length,
+        reserved: inCat.where((p) => p.reserved).length,
+      ));
+    }
+
+    final color = free == 0 ? AgentColors.bad : AgentColors.ok;
     return [
-      TileGrid([
-        InfoTile(
-          full ? Icons.block_rounded : Icons.check_circle_rounded,
-          'État',
-          full ? 'Complet' : 'Places disponibles',
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.45)),
         ),
-      ]),
+        child: Row(
+          children: [
+            Icon(free == 0 ? Icons.block_rounded : Icons.check_circle_rounded,
+                size: 30, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    free == 0 ? 'Parking complet' : '$free place${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    '${parked.length} garé${parked.length > 1 ? 's' : ''} · '
+                    '$reserved réservée${reserved > 1 ? 's' : ''} · '
+                    '${places.length} au total',
+                    style: const TextStyle(
+                      color: AgentColors.ink,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      const SectionLabel('Disponibilités'),
+      const SizedBox(height: 8),
+      ...cats,
+      const SizedBox(height: 16),
+      SectionLabel('Véhicules stationnés (${parked.length})'
+          '${violations > 0 ? ' · $violations en infraction' : ''}'),
+      const SizedBox(height: 8),
+      if (parked.isEmpty)
+        const Text(
+          'Aucun véhicule stationné dans ce parking.',
+          style: TextStyle(
+            color: AgentColors.muted,
+            fontWeight: FontWeight.w600,
+          ),
+        )
+      else
+        for (final p in parked)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _LotVehicleRow(
+              controller: controller,
+              info: p,
+              now: now,
+            ),
+          ),
     ];
   }
 
@@ -482,5 +574,145 @@ class _SpotPanel extends StatelessWidget {
           ),
       ],
     ];
+  }
+}
+
+/// Une catégorie de places d'un parking : libres / total.
+class _AvailabilityRow extends StatelessWidget {
+  const _AvailabilityRow({
+    required this.code,
+    required this.free,
+    required this.total,
+    required this.reserved,
+  });
+
+  final String code;
+  final int free, total, reserved;
+
+  @override
+  Widget build(BuildContext context) {
+    final rate = total == 0 ? 0.0 : (total - free) / total;
+    final color = free == 0
+        ? AgentColors.bad
+        : (rate >= 0.7 ? AgentColors.warn : AgentColors.blue);
+    final icon = switch (code) {
+      'pmr' => Icons.accessible_rounded,
+      'elec' => Icons.bolt_rounded,
+      'moto' => Icons.two_wheeler_rounded,
+      _ => Icons.directions_car_rounded,
+    };
+    final label = switch (code) {
+      'pmr' => 'PMR',
+      'elec' => 'Électriques',
+      'moto' => 'Motos',
+      _ => 'Voitures',
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AgentColors.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: AgentColors.ink,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+              Text(
+                '$free libre${free > 1 ? 's' : ''} / $total'
+                '${reserved > 0 ? ' · $reserved réservée${reserved > 1 ? 's' : ''}' : ''}',
+                style: const TextStyle(
+                  color: AgentColors.muted,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: rate,
+              minHeight: 7,
+              color: color,
+              backgroundColor: AgentColors.line,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Un véhicule garé dans un parking, avec son état et (s'il est en infraction)
+/// le bouton pour dresser une contravention.
+class _LotVehicleRow extends StatelessWidget {
+  const _LotVehicleRow({
+    required this.controller,
+    required this.info,
+    required this.now,
+  });
+
+  final AgentController controller;
+  final SlotInfo info;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = info.complianceAt(now);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AgentColors.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: c.color.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: PlateBadge(info.plate),
+                ),
+              ),
+              ComplianceBadge(c),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Place ${info.id} · ${info.typeLabel}'
+            '${info.pmr ? ' · PMR' : ''}${info.elec ? ' · borne' : ''}',
+            style: const TextStyle(
+              color: AgentColors.ink,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+          Text(
+            info.detailAt(now),
+            style: TextStyle(
+              color: c.isViolation ? c.color : AgentColors.muted,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+            ),
+          ),
+          if (c.isViolation) ...[
+            const SizedBox(height: 10),
+            FineButton(controller: controller, info: info),
+          ],
+        ],
+      ),
+    );
   }
 }

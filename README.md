@@ -36,9 +36,11 @@ Le volume `monserveur-data` garde les bases (contraventions comprises) quand le 
 |---|---|---|
 | `OSS117` | `Lablanquette117` | agent |
 | `ab123456` | `Mon_mdp123` | usager |
-| `cd789` | `autre_MDP666` | usager |
+| `cd789` | `autre_MDP666` | usager (véhicule électrique) |
+| `ef321` | `Mdp_Chloe_321` | usager |
+| `gh654` | `Mdp_Hugo_654` | usager (carte mobilité inclusion) |
 
-L'espace agent n'accepte que les comptes de type `agent`.
+Un compte `agent` ouvre l'espace agent, un compte `user` ouvre l'espace usager.
 
 
 # client7360
@@ -164,3 +166,20 @@ flutter run --dart-define=API_URL=http://192.168.1.20:8000
 ```
 
 (adresse IP du PC qui fait tourner le serveur ; le pare-feu doit autoriser le port 8000).
+
+## Espace usager
+
+Quatre onglets, même style que l'espace agent, tous alimentés par le serveur (routes `/me/...`, réservées aux comptes `user`) :
+
+| Onglet | Contenu | Route(s) |
+|---|---|---|
+| Carte | Plan interactif. Place libre : bouton « Réserver ». Place occupée ou réservée : infos de la place seulement (jamais le véhicule). Parking : places libres par catégorie (voiture, PMR, électrique, moto) et réservation d'une catégorie | `GET /parking`, `GET /me/slots`, `GET /me/parkings` |
+| Réservations | En cours / à venir / historique ; « Je suis arrivé(e) », « Reprendre la route », « Annuler » ; véhicules garés sans réservation | `GET /me/reservations`, `POST /me/reservations`, `.../{id}/checkin`, `.../{id}/checkout`, `.../{id}/cancel`, `POST /me/vehicles/{plaque}/leave` |
+| Amendes | Contraventions reçues sur ses véhicules, paiement (simulé) | `GET /me/fines`, `POST /me/fines/{n}/pay` |
+| Profil | Nom, prénom, plaque, type de véhicule, électrique, carte mobilité inclusion, notifications | `GET` / `PUT /me/profile` |
+
+Réserver : la feuille de réservation est préremplie avec le profil, on choisit le début (maintenant, dans 30 min, 1 h, 2 h ou une heure précise) et la durée, le montant (`tarif × durée`) est affiché avant de valider. Pour un parking, le serveur choisit une place libre de la catégorie demandée. Une place PMR demande la carte mobilité inclusion dans le profil, une place avec borne un véhicule électrique.
+
+Cycle d'une réservation : *réservée* → (« Je suis arrivé(e) ») *garé* : la place devient occupée et payée jusqu'à la fin de la réservation, ce que voit l'agent → (« Reprendre la route ») *terminée*. Si l'usager dépasse l'heure de fin, le véhicule apparaît en infraction chez l'agent.
+
+Les rappels (début de réservation, fin de stationnement, nouvelle contravention) s'affichent dans l'application, selon les réglages du profil.

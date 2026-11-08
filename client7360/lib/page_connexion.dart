@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'agent/agent_service.dart';
 import 'agent/agent_shell.dart';
 import 'agent/agent_theme.dart';
-import 'chercher_un_parking.dart';
 import 'parametres_page.dart';
+import 'user/user_service.dart';
+import 'user/user_shell.dart';
 
 /// Page de connexion unique : selon le type du compte, on arrive côté agent
 /// (carte, infractions, stats, amendes) ou côté usager. Identifiants
@@ -33,7 +34,7 @@ class _PageConnexionState extends State<PageConnexion> {
   void _openSpace(String type, String name) {
     final Widget page = type == 'agent'
         ? AgentShell(agentName: name)
-        : const ChercherUnParking();
+        : UserShell(userName: name);
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => page));
   }
 
@@ -49,6 +50,7 @@ class _PageConnexionState extends State<PageConnexion> {
     });
     try {
       final type = await AgentService.authenticate(id, _password.text);
+      if (type != 'agent') UserService.remember(id, _password.text);
       if (!mounted) return;
       _openSpace(type, id);
     } on AgentAuthException catch (e) {

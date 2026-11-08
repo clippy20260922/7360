@@ -136,3 +136,53 @@ Les routes `/agent/...` sont réservées aux utilisateurs de type `agent` (400 s
     +- fines : GET = contraventions (`?mine=true` pour celles de l'agent connecté) ; POST = dresser une contravention   
 
 `POST /agent/fines` reçoit `{"slot_id": 9, "offense": "overtime", "plate": "AB123CD" (facultatif), "comment": "..." (facultatif)}`. L'agent, le montant, le lieu et la date sont remplis par le serveur. Refus : place inconnue (404), aucun véhicule sur la place, infraction inconnue ou plaque manquante (400), contravention déjà dressée pour cette place depuis moins de 12 h (409).
+
+### Parkings, réservations et espace usager
+
+Les places d'un parking sont des lignes de `slot_table` dont la colonne `parking` est renseignée (elles ne sont pas dessinées une à une sur la carte : elles sont comptées dans le parking). La catégorie d'une place est déduite de ses colonnes : `pmr` si `slot_pmr`, sinon `moto` si `slot_type` vaut `moto`, sinon `elec` si `slot_elec`, sinon `standard`.
+
+#### reservation_table
+| Colonne | Type | Définition |
+|-----|------|-----|
+| reservation_id | int | Clé primaire, auto-incrémentation |
+| username | char[30] | Usager qui a réservé |
+| slot_id | int | Place réservée (choisie par le serveur pour un parking) |
+| parking | char[20] | Nom du parking, vide pour une place de rue |
+| no_plaque, type_vehicule | char | Véhicule |
+| nom, prenom | char[40] | Conducteur |
+| start_at, end_at | timestamp | Créneau, en UTC |
+| amount | float | `slot_tarif × durée en heures` |
+| status | char[10] | `booked` → `parked` → `finished`, ou `cancelled` |
+| created_at, checkin_at, checkout_at | timestamp | Dates |
+
+#### profile_table
+`username` (clé primaire), `nom`, `prenom`, `no_plaque`, `type_vehicule`, `elec` (véhicule électrique), `pmr` (carte mobilité inclusion), `notif_reservations`, `notif_expiration`, `notif_fines`.
+
+#### fine_table (colonnes ajoutées)
+`paye` (0/1) et `paye_le` : contravention payée par l'usager.
+
+#### meta_table
+Carnet de notes interne (`cle`, `valeur`) : sert à n'ajouter qu'une fois les places des parkings et les véhicules de départ.
+
+#### Routes `/me/...` (usagers uniquement : 400 si non authentifié, 403 pour un agent)
+
+ |   
++- me   
+     |   
+    +- profile : GET / PUT, profil de l'usager (la plaque est enregistrée comme véhicule de l'usager)   
+     |   
+    +- slots : places de rue avec statut `free`/`occupied`/`reserved` et créneaux déjà réservés (jamais d'info sur le véhicule)   
+     |   
+    +- parkings : parkings avec places libres/total par catégorie et tarif   
+     |   
+    +- reservations : GET = réservations (avec `state` : `upcoming`, `active`, `parked`, `finished`, `cancelled`, `expired`) et véhicules garés ; POST = réserver   
+     |   
+    +- reservations/{id}/checkin, checkout, cancel : arrivée, départ, annulation   
+     |   
+    +- vehicles/{plaque}/leave : libérer la place d'un véhicule garé sans réservation   
+     |   
+    +- fines : GET = contraventions des véhicules de l'usager ; POST fines/{n}/pay = payer   
+
+`POST /me/reservations` reçoit `{"slot_id": 1}` (place de rue) **ou** `{"parking": "Le Parking", "category": "elec"}`, plus `start` (`AAAA-MM-JJ HH:MM:SS` en UTC, vide = maintenant), `duration_minutes` (15 à 1440), `plate`, `vehicle_type`, `nom`, `prenom`. Refus : durée ou date invalide (400), type de véhicule différent de la place (400), place PMR sans carte ou place avec borne sans véhicule électrique (403), plaque d'un autre usager, créneau déjà pris, place occupée, plus de place disponible dans la catégorie (409).
+
+Côté agent, `GET /agent/slots` renvoie aussi `reserved` (place réservée en ce moment) et les places des parkings : les véhicules en infraction dans les parkings apparaissent donc dans les infractions.

@@ -189,6 +189,18 @@ class AgentService {
   /// Écart entre l'horloge du serveur et celle de l'appareil.
   static Duration _clockOffset = Duration.zero;
 
+  /// Cale l'horloge sur celle du serveur (utilisé aussi par le côté usager).
+  static void syncClock(DateTime serverNow) {
+    _clockOffset = serverNow.difference(DateTime.now().toUtc());
+  }
+
+  /// Message `detail` d'une réponse d'erreur du serveur.
+  static String errorDetail(http.Response res, String fallback) =>
+      _detail(res, fallback);
+
+  /// Vrai quand le serveur ne nous reconnaît plus (il faut se reconnecter).
+  static bool needsLogin(http.Response res) => _needsLogin(res);
+
   /// Maintenant, à l'heure du serveur (UTC).
   static DateTime now() => DateTime.now().toUtc().add(_clockOffset);
 
@@ -282,9 +294,7 @@ class AgentService {
     final body = _json(res, 'Places indisponibles');
 
     final serverNow = parseServerTime(body['now'] as String?, keepOldDates: true);
-    if (serverNow != null) {
-      _clockOffset = serverNow.difference(DateTime.now().toUtc());
-    }
+    if (serverNow != null) syncClock(serverNow);
     return AgentSnapshot(
       map: map,
       slots: [

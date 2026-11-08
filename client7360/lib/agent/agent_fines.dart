@@ -56,6 +56,7 @@ Offense? defaultOffenseFor(List<Offense> offenses, Compliance c) {
 /// via `GET /agent/fines`).
 class Fine {
   const Fine({
+    required this.no,
     required this.id,
     required this.plate,
     required this.vehicleType,
@@ -67,9 +68,12 @@ class Fine {
     required this.amount,
     required this.issuedAt,
     this.comment,
+    this.paid = false,
+    this.paidAt,
   });
 
   factory Fine.fromJson(Map<String, dynamic> j) => Fine(
+        no: (j['no'] as num?)?.toInt() ?? 0,
         id: j['id'] as String,
         plate: j['plate'] as String,
         vehicleType: j['vehicle_type'] as String? ?? 'voit',
@@ -82,8 +86,11 @@ class Fine {
         issuedAt: parseServerTime(j['issued_at'] as String?, keepOldDates: true) ??
             DateTime.now().toUtc(),
         comment: j['comment'] as String?,
+        paid: j['paid'] == true,
+        paidAt: parseServerTime(j['paid_at'] as String?, keepOldDates: true),
       );
 
+  final int no; // numéro en base (sert à payer la contravention)
   final String id; // ex. PV-2026-00042
   final String plate;
   final String vehicleType; // 'voit' | 'moto'
@@ -94,6 +101,8 @@ class Fine {
   final double amount;
   final DateTime issuedAt; // UTC
   final String? comment;
+  final bool paid; // réglée par l'usager
+  final DateTime? paidAt; // UTC
 
   String get vehicleLabel => vehicleType == 'moto' ? 'Moto' : 'Voiture';
   Color get color => offenseColor(offenseCode, amount);

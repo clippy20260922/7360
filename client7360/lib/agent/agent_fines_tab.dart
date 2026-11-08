@@ -218,6 +218,8 @@ class _FineCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               Tag(Icons.tag_rounded, fine.id, color: color),
+              if (fine.paid)
+                const Tag(Icons.task_alt_rounded, 'Payée', color: AgentColors.ok),
               Tag(Icons.schedule_rounded, formatDateTime(fine.issuedAt)),
               Tag(Icons.badge_outlined, fine.agentId),
               Tag(
