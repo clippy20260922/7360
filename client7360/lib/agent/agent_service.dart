@@ -192,9 +192,10 @@ class AgentService {
   /// Maintenant, à l'heure du serveur (UTC).
   static DateTime now() => DateTime.now().toUtc().add(_clockOffset);
 
-  /// POST /token (formulaire OAuth2). Lève [AgentAuthException] si refusé ;
+  /// POST /token (formulaire OAuth2). Renvoie le type du compte (`agent` ou
+  /// `user`). Lève [AgentAuthException] si les identifiants sont refusés ;
   /// toute autre exception = serveur injoignable.
-  static Future<void> login(String username, String password) async {
+  static Future<String> authenticate(String username, String password) async {
     final res = await http
         .post(
           Uri.parse('$_base/token'),
@@ -206,11 +207,22 @@ class AgentService {
           _detail(res, 'Identifiant ou mot de passe incorrect.'));
     }
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    if (body['type'] != 'agent') {
+    final type = body['type'] as String? ?? 'user';
+    if (type == 'agent') {
+      agentId = username;
+      _password = password;
+    } else {
+      logout(); // on ne garde rien d'une ancienne session agent
+    }
+    return type;
+  }
+
+  /// Reconnexion d'un agent (réservé aux comptes de type agent).
+  static Future<void> login(String username, String password) async {
+    final type = await authenticate(username, password);
+    if (type != 'agent') {
       throw AgentAuthException("Ce compte n'est pas un compte agent.");
     }
-    agentId = username;
-    _password = password;
   }
 
   static void logout() {

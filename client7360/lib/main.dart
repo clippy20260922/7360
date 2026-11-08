@@ -5,7 +5,7 @@ import 'server_ui.dart';
 import 'zone_page.dart';
 import 'exemple_de_page.dart';
 import 'parking_map_page.dart';
-import 'ecran_daccueil.dart';
+import 'page_connexion.dart';
 
 void main() {
   runApp(const MyApp());
@@ -37,7 +37,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: .fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const EcranDAccueil(),
+      home: const PageConnexion(),
     );
   }
 }
@@ -76,11 +76,11 @@ class _MyHomePageState extends State<MyHomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const EcranDAccueil(),
+                    builder: (context) => const PageConnexion(),
                   ),
                 );
               },
-              child: const Text('Écran d\'accueil'),
+              child: const Text('Connexion'),
             ),
 
             const SizedBox(height: 32),

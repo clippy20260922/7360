@@ -3,17 +3,20 @@ import 'package:flutter/material.dart';
 import 'agent/agent_service.dart';
 import 'agent/agent_shell.dart';
 import 'agent/agent_theme.dart';
+import 'chercher_un_parking.dart';
+import 'parametres_page.dart';
 
-/// Connexion de l'agent (écran « Je suis agent »). Une fois connecté, on
-/// arrive directement sur la page agent : carte, problématiques, stats.
-class PageAgent extends StatefulWidget {
-  const PageAgent({super.key});
+/// Page de connexion unique : selon le type du compte, on arrive côté agent
+/// (carte, infractions, stats, amendes) ou côté usager. Identifiants
+/// inconnus : message d'erreur.
+class PageConnexion extends StatefulWidget {
+  const PageConnexion({super.key});
 
   @override
-  State<PageAgent> createState() => _PageAgentState();
+  State<PageConnexion> createState() => _PageConnexionState();
 }
 
-class _PageAgentState extends State<PageAgent> {
+class _PageConnexionState extends State<PageConnexion> {
   final _id = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
@@ -27,10 +30,11 @@ class _PageAgentState extends State<PageAgent> {
     super.dispose();
   }
 
-  void _openAgentPage(String name) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => AgentShell(agentName: name)),
-    );
+  void _openSpace(String type, String name) {
+    final Widget page = type == 'agent'
+        ? AgentShell(agentName: name)
+        : const ChercherUnParking();
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => page));
   }
 
   Future<void> _submit() async {
@@ -44,9 +48,9 @@ class _PageAgentState extends State<PageAgent> {
       _error = null;
     });
     try {
-      await AgentService.login(id, _password.text);
+      final type = await AgentService.authenticate(id, _password.text);
       if (!mounted) return;
-      _openAgentPage(id);
+      _openSpace(type, id);
     } on AgentAuthException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -87,6 +91,16 @@ class _PageAgentState extends State<PageAgent> {
           backgroundColor: Colors.transparent,
           foregroundColor: Colors.white,
           elevation: 0,
+          actions: [
+            IconButton(
+              tooltip: 'Réglages',
+              icon: const Icon(Icons.settings_rounded),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ParametresPage()),
+              ),
+            ),
+          ],
         ),
         body: Container(
           decoration: const BoxDecoration(
@@ -135,7 +149,7 @@ class _PageAgentState extends State<PageAgent> {
                       ),
                       const SizedBox(height: 18),
                       const Text(
-                        'Espace agent',
+                        'Connexion',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 28,
@@ -144,7 +158,7 @@ class _PageAgentState extends State<PageAgent> {
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        'Contrôle du stationnement',
+                        'Accédez à votre espace',
                         style: TextStyle(color: Color(0xFF9FB0D0), fontSize: 15),
                       ),
                       const SizedBox(height: 28),
@@ -162,7 +176,7 @@ class _PageAgentState extends State<PageAgent> {
                               textInputAction: TextInputAction.next,
                               autocorrect: false,
                               decoration: _decoration(
-                                "Numéro d'identification",
+                                'Identifiant',
                                 Icons.badge_outlined,
                               ),
                             ),

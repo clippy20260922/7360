@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'agent_fines_tab.dart';
+import '../page_connexion.dart';
 import 'agent_map_tab.dart';
 import 'agent_service.dart';
 import 'agent_stats_tab.dart';
@@ -44,7 +45,9 @@ class _AgentShellState extends State<AgentShell> {
 
   void _logout() {
     AgentService.logout();
-    Navigator.of(context).pop();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const PageConnexion()),
+    );
   }
 
   @override

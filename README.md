@@ -135,7 +135,7 @@ flutter test
 
 ## Espace agent
 
-Après « Je suis agent » et la connexion (`POST /token`), l'application ouvre quatre onglets, tous alimentés par le serveur :
+Il n'y a qu'une page de connexion (`POST /token`) : un compte de type `agent` ouvre l'espace agent, un compte de type `user` ouvre l'espace usager, des identifiants inconnus affichent une erreur. L'espace agent a quatre onglets, tous alimentés par le serveur :
 
 | Onglet | Route(s) utilisée(s) |
 |---|---|
