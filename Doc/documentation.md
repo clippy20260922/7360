@@ -186,3 +186,41 @@ Carnet de notes interne (`cle`, `valeur`) : sert à n'ajouter qu'une fois les pl
 `POST /me/reservations` reçoit `{"slot_id": 1}` (place de rue) **ou** `{"parking": "Le Parking", "category": "elec"}`, plus `start` (`AAAA-MM-JJ HH:MM:SS` en UTC, vide = maintenant), `duration_minutes` (15 à 1440), `plate`, `vehicle_type`, `nom`, `prenom`. Refus : durée ou date invalide (400), type de véhicule différent de la place (400), place PMR sans carte ou place avec borne sans véhicule électrique (403), plaque d'un autre usager, créneau déjà pris, place occupée, plus de place disponible dans la catégorie (409).
 
 Côté agent, `GET /agent/slots` renvoie aussi `reserved` (place réservée en ce moment) et les places des parkings : les véhicules en infraction dans les parkings apparaissent donc dans les infractions.
+
+### Signalements de places prises
+
+#### report_table
+| Colonne | Type | Définition |
+|-----|------|-----|
+| report_id | int | Clé primaire, auto-incrémentation |
+| slot_id | int | Place signalée |
+| username | char[30] | Usager qui signale |
+| no_plaque | char[9] | Plaque indiquée par l'usager (facultative) |
+| commentaire | char[300] | Précision (facultative) |
+| reported_at | timestamp | Heure du signalement, UTC (début de l'occupation sans paiement) |
+| status | char[10] | `pending` → `validated` ou `dismissed` |
+| handled_by, handled_at | | Agent qui a traité et quand |
+| assigned_plate | char[9] | Plaque finalement assignée à la place |
+
+`slot_table.occupied_since` (timestamp) : depuis quand la place est occupée (arrivée d'une réservation, assignation par un agent). Renvoyé par `GET /agent/slots` dans `since`.
+
+#### Routes
+
+ |   
++- me   
+ |   |   
+ |  +- reports : POST = signaler une place de rue libre ou réservée ; GET = mes signalements et leur statut   
+ |   
++- agent   
+     |   
+    +- reports : GET = signalements (à traiter d'abord) avec le véhicule et son propriétaire s'ils sont connus   
+     |   
+    +- reports/{id}/validate : POST `{"plate": ...}` (facultatif si le signalement en a une) ; assigne la place au véhicule depuis `reported_at`, sans paiement   
+     |   
+    +- reports/{id}/dismiss : POST ; rejette le signalement   
+     |   
+    +- vehicles/{plaque} : GET ; `known`, propriétaire (`owner`), type, `parked_slot`   
+     |   
+    +- slots/{id}/assign : POST `{"plate": ...}` ; assigne une place libre à un véhicule à partir de maintenant (règle aussi un signalement en attente sur cette place)   
+
+Refus : place inconnue (404) ; place de parking, place déjà occupée ou déjà signalée, véhicule déjà stationné, signalement déjà traité (409) ; plaque invalide ou manquante (400).

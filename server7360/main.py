@@ -11,6 +11,7 @@ import os
 import json
 import math
 import re
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 # Dossier des bases de données : /data par défaut (conteneur), modifiable pour
@@ -194,7 +195,7 @@ def init_slot_table(DB_PATH: Path) -> None:
         " fin_occupation timestamp NOT NULL DEFAULT '1900-01-01 00:00:00')"
     )
     #Position sur le plan (en mètres, pas en GPS) et orientation de la place
-    ensure_columns(conn, "slot_table", {"slot_x": "float", "slot_y": "float", "slot_angle": "float DEFAULT 0"})
+    ensure_columns(conn, "slot_table", {"slot_x": "float", "slot_y": "float", "slot_angle": "float DEFAULT 0", "occupied_since": "timestamp"})
     row = conn.execute("SELECT slot_id FROM slot_table WHERE slot_id = 1").fetchone()
     if row is None:
         libre = "1900-01-01 00:00:00"
@@ -485,6 +486,28 @@ def init_reservation_table(DB_PATH: Path) -> None:
     conn.commit()
     conn.close()
 
+### Signalements d'une place « prise » par un usager (traités ensuite par un agent)
+
+def init_report_table(DB_PATH: Path) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    #status : pending (à traiter) → validated (place assignée au véhicule) ou dismissed (rejeté)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS report_table ("\
+        " report_id INTEGER PRIMARY KEY AUTOINCREMENT,"\
+        " slot_id INTEGER NOT NULL,"\
+        " username char[30] NOT NULL,"\
+        " no_plaque char[9] DEFAULT NULL,"\
+        " commentaire char[300],"\
+        " reported_at timestamp NOT NULL,"\
+        " status char[10] NOT NULL DEFAULT 'pending',"\
+        " handled_by char[30] DEFAULT NULL,"\
+        " handled_at timestamp DEFAULT NULL,"\
+        " assigned_plate char[9] DEFAULT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
 ### Profil des usagers (nom, prénom, véhicule, notifications)
 
 def init_profile_table(DB_PATH: Path) -> None:
@@ -531,6 +554,7 @@ def startup_event() -> None:
     init_fine_table(DB_PATH)
     init_reservation_table(DB_PATH)
     init_profile_table(DB_PATH)
+    init_report_table(DB_PATH)
     init_parking_slots(DB_PATH)
     init_user_table(USER_DB_PATH)
     
@@ -888,6 +912,7 @@ def get_agent_slots() -> dict:
         "occupied": bool(r["slot_occupied"]),
         "reserved": (not r["slot_occupied"]) and r["slot_id"] in reserved,
         "fin_occupation": r["fin_occupation"],
+        "since": r["occupied_since"] if r["slot_occupied"] else None,
         "plate": r["plaque"],
         "owner": r["proprietaire"],
     } for r in rows]
@@ -1313,7 +1338,7 @@ def free_vehicle_slot(conn: sqlite3.Connection, plate: str) -> None:
     garee = conn.execute("SELECT current_slot FROM vehicle_table WHERE no_plaque = ?", (plate,)).fetchone()
     if garee is None or garee["current_slot"] is None:
         return
-    conn.execute("UPDATE slot_table SET slot_occupied = 0, fin_occupation = '1900-01-01 00:00:00' WHERE slot_id = ?", (garee["current_slot"],))
+    conn.execute("UPDATE slot_table SET slot_occupied = 0, fin_occupation = '1900-01-01 00:00:00', occupied_since = NULL WHERE slot_id = ?", (garee["current_slot"],))
     conn.execute("UPDATE vehicle_table SET current_slot = NULL WHERE no_plaque = ?", (plate,))
     conn.execute(
         "UPDATE reservation_table SET status = 'finished', checkout_at = ? WHERE no_plaque = ? AND slot_id = ? AND status = 'parked'",
@@ -1353,7 +1378,7 @@ def checkin_my_reservation(reservation_id: int) -> dict:
         (r["no_plaque"], current_user.username, r["type_vehicule"], bool(slot["slot_elec"]))
     )
     conn.execute("UPDATE vehicle_table SET current_slot = ? WHERE no_plaque = ?", (r["slot_id"], r["no_plaque"]))
-    conn.execute("UPDATE slot_table SET slot_occupied = 1, fin_occupation = ? WHERE slot_id = ?", (r["end_at"], r["slot_id"]))
+    conn.execute("UPDATE slot_table SET slot_occupied = 1, fin_occupation = ?, occupied_since = ? WHERE slot_id = ?", (r["end_at"], ts(now), r["slot_id"]))
     conn.execute("UPDATE reservation_table SET status = 'parked', checkin_at = ? WHERE reservation_id = ?", (ts(now), reservation_id))
     conn.commit()
     row = conn.execute(RESERVATION_SELECT + "WHERE reservation_id = ?", (reservation_id,)).fetchone()
@@ -1460,6 +1485,187 @@ def pay_my_fine(fine_no: int) -> dict:
     ).fetchone()
     conn.close()
     return {"data": fine_to_dict(row)}
+
+
+
+########## Signalements et assignation de places ##########
+
+
+### Outils communs
+
+def slot_location(conn: sqlite3.Connection, slot_id: int) -> str:
+    slot = conn.execute("SELECT slot_adresse, slot_ville, parking FROM slot_table WHERE slot_id = ?", (slot_id,)).fetchone()
+    if slot is None:
+        return ""
+    return slot["parking"] or ", ".join(x for x in (slot["slot_adresse"], slot["slot_ville"]) if x)
+
+def vehicle_info(conn: sqlite3.Connection, plate: str) -> dict:
+    #Ce que l'agent peut savoir d'une plaque : le propriétaire (s'il est connu) et où le véhicule est garé
+    v = conn.execute("SELECT * FROM vehicle_table WHERE no_plaque = ?", (plate,)).fetchone()
+    if v is None:
+        return {"plate": plate, "known": False, "owner": None, "vehicle_type": None, "elec": False, "parked_slot": None}
+    owner = None
+    if v["proprietaire"] and v["proprietaire"] != "inconnu":
+        p = load_profile(conn, v["proprietaire"])
+        owner = {"username": v["proprietaire"], "nom": p["nom"], "prenom": p["prenom"]}
+    return {"plate": plate, "known": owner is not None, "owner": owner, "vehicle_type": v["type_vehicule"],
+            "elec": bool(v["elec"]), "parked_slot": v["current_slot"]}
+
+def assign_slot_to_vehicle(conn: sqlite3.Connection, slot_id: int, plate: str, since: datetime) -> None:
+    #La place est occupée par ce véhicule depuis « since », sans aucun paiement (donc en infraction)
+    slot = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (slot_id,)).fetchone()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+    if slot["slot_occupied"]:
+        raise HTTPException(status_code=409, detail="Cette place est déjà occupée")
+    if not re.fullmatch(r"[A-Z0-9]{4,9}", plate):
+        raise HTTPException(status_code=400, detail="Plaque d'immatriculation invalide")
+    v = conn.execute("SELECT current_slot FROM vehicle_table WHERE no_plaque = ?", (plate,)).fetchone()
+    if v is not None and v["current_slot"] is not None:
+        raise HTTPException(status_code=409, detail="Ce véhicule est déjà stationné sur la place " + str(v["current_slot"]))
+    if v is None:
+        #Plaque inconnue : le véhicule est enregistré sans propriétaire
+        conn.execute("INSERT INTO vehicle_table (no_plaque, proprietaire, type_vehicule, elec) VALUES (?, 'inconnu', ?, ?)",
+                     (plate, slot["slot_type"], bool(slot["slot_elec"])))
+    conn.execute("UPDATE vehicle_table SET current_slot = ? WHERE no_plaque = ?", (slot_id, plate))
+    conn.execute("UPDATE slot_table SET slot_occupied = 1, fin_occupation = '1900-01-01 00:00:00', occupied_since = ? WHERE slot_id = ?",
+                 (ts(since), slot_id))
+
+
+### Côté usager : signaler une place prise
+
+class ReportPayload(BaseModel):
+    slot_id: int
+    plate: str | None = None       #facultative : la plaque du véhicule, si l'usager la voit
+    comment: str | None = None
+
+def my_report_to_dict(conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
+    return {"id": r["report_id"], "slot_id": r["slot_id"], "location": slot_location(conn, r["slot_id"]),
+            "reported_at": r["reported_at"], "status": r["status"], "plate": r["no_plaque"], "comment": r["commentaire"],
+            "assigned_plate": r["assigned_plate"]}
+
+@app.post("/me/reports")
+def create_my_report(payload: ReportPayload) -> dict:
+    require_user()
+    plate = norm_plate(payload.plate)
+    if plate != "" and not re.fullmatch(r"[A-Z0-9]{4,9}", plate):
+        raise HTTPException(status_code=400, detail="Plaque d'immatriculation invalide")
+    with closing(open_db()) as conn:
+        slot = conn.execute("SELECT * FROM slot_table WHERE slot_id = ?", (payload.slot_id,)).fetchone()
+        if slot is None:
+            raise HTTPException(status_code=404, detail="Pas de place avec cet identifiant")
+        if slot["parking"] is not None:
+            raise HTTPException(status_code=400, detail="Seules les places de rue peuvent être signalées")
+        if slot["slot_occupied"]:
+            raise HTTPException(status_code=409, detail="Cette place est déjà indiquée comme occupée")
+        deja = conn.execute("SELECT report_id FROM report_table WHERE slot_id = ? AND status = 'pending'", (payload.slot_id,)).fetchone()
+        if deja is not None:
+            raise HTTPException(status_code=409, detail="Cette place a déjà été signalée : un agent va la vérifier")
+        comment = (payload.comment or "").strip() or None
+        cur = conn.execute(
+            "INSERT INTO report_table (slot_id, username, no_plaque, commentaire, reported_at, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+            (payload.slot_id, current_user.username, plate or None, comment, ts(utc_now()))
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM report_table WHERE report_id = ?", (cur.lastrowid,)).fetchone()
+        return {"data": my_report_to_dict(conn, row)}
+
+@app.get("/me/reports")
+def get_my_reports() -> dict:
+    require_user()
+    with closing(open_db()) as conn:
+        rows = conn.execute("SELECT * FROM report_table WHERE username = ? ORDER BY report_id DESC LIMIT 20", (current_user.username,)).fetchall()
+        data = [my_report_to_dict(conn, r) for r in rows]
+    return {"N": len(data), "data": data}
+
+
+### Côté agent : traiter les signalements
+
+def report_to_dict(conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
+    reporter = load_profile(conn, r["username"])
+    return {
+        "id": r["report_id"], "slot_id": r["slot_id"], "location": slot_location(conn, r["slot_id"]),
+        "reported_at": r["reported_at"], "status": r["status"], "plate": r["no_plaque"], "comment": r["commentaire"],
+        "reporter": {"username": r["username"], "nom": reporter["nom"], "prenom": reporter["prenom"]},
+        "handled_by": r["handled_by"], "handled_at": r["handled_at"], "assigned_plate": r["assigned_plate"],
+        #Si l'usager a donné une plaque : le véhicule et son propriétaire (s'ils sont connus)
+        "vehicle": vehicle_info(conn, r["no_plaque"]) if r["no_plaque"] else None,
+    }
+
+@app.get("/agent/reports")
+def get_agent_reports() -> dict:
+    require_agent()
+    with closing(open_db()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM report_table ORDER BY (status = 'pending') DESC, report_id DESC LIMIT 60"
+        ).fetchall()
+        data = [report_to_dict(conn, r) for r in rows]
+    return {"now": ts(utc_now()), "N": len(data), "data": data}
+
+@app.get("/agent/vehicles/{plate}")
+def get_agent_vehicle(plate: str) -> dict:
+    require_agent()
+    plate = norm_plate(plate)
+    if not re.fullmatch(r"[A-Z0-9]{4,9}", plate):
+        raise HTTPException(status_code=400, detail="Plaque d'immatriculation invalide")
+    with closing(open_db()) as conn:
+        return {"data": vehicle_info(conn, plate)}
+
+class ValidatePayload(BaseModel):
+    plate: str | None = None       #si la plaque n'était pas dans le signalement, ou pour la corriger
+
+def get_pending_report(conn: sqlite3.Connection, report_id: int) -> sqlite3.Row:
+    r = conn.execute("SELECT * FROM report_table WHERE report_id = ?", (report_id,)).fetchone()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Pas de signalement avec cet identifiant")
+    if r["status"] != "pending":
+        raise HTTPException(status_code=409, detail="Ce signalement a déjà été traité")
+    return r
+
+@app.post("/agent/reports/{report_id}/validate")
+def validate_agent_report(report_id: int, payload: ValidatePayload) -> dict:
+    #La place est assignée au véhicule depuis l'heure du signalement, sans paiement : le véhicule est en infraction
+    require_agent()
+    with closing(open_db()) as conn:
+        r = get_pending_report(conn, report_id)
+        plate = norm_plate(payload.plate) or (r["no_plaque"] or "")
+        if plate == "":
+            raise HTTPException(status_code=400, detail="Indiquez la plaque du véhicule")
+        assign_slot_to_vehicle(conn, r["slot_id"], plate, parse_ts(r["reported_at"]))
+        conn.execute("UPDATE report_table SET status = 'validated', handled_by = ?, handled_at = ?, assigned_plate = ? WHERE report_id = ?",
+                     (current_user.username, ts(utc_now()), plate, report_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM report_table WHERE report_id = ?", (report_id,)).fetchone()
+        return {"data": report_to_dict(conn, row)}
+
+@app.post("/agent/reports/{report_id}/dismiss")
+def dismiss_agent_report(report_id: int) -> dict:
+    require_agent()
+    with closing(open_db()) as conn:
+        get_pending_report(conn, report_id)
+        conn.execute("UPDATE report_table SET status = 'dismissed', handled_by = ?, handled_at = ? WHERE report_id = ?",
+                     (current_user.username, ts(utc_now()), report_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM report_table WHERE report_id = ?", (report_id,)).fetchone()
+        return {"data": report_to_dict(conn, row)}
+
+class AssignPayload(BaseModel):
+    plate: str
+
+@app.post("/agent/slots/{slot_id}/assign")
+def assign_agent_slot(slot_id: int, payload: AssignPayload) -> dict:
+    #L'agent constate qu'un véhicule est garé sur une place libre : il l'y assigne (à partir de maintenant, sans paiement)
+    require_agent()
+    plate = norm_plate(payload.plate)
+    if plate == "":
+        raise HTTPException(status_code=400, detail="Indiquez la plaque du véhicule")
+    with closing(open_db()) as conn:
+        assign_slot_to_vehicle(conn, slot_id, plate, utc_now())
+        #Un signalement en attente sur cette place est réglé du même coup
+        conn.execute("UPDATE report_table SET status = 'validated', handled_by = ?, handled_at = ?, assigned_plate = ? WHERE slot_id = ? AND status = 'pending'",
+                     (current_user.username, ts(utc_now()), plate, slot_id))
+        conn.commit()
+        return {"data": {"slot_id": slot_id, "vehicle": vehicle_info(conn, plate)}}
 
 
 

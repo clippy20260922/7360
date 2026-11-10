@@ -9,6 +9,7 @@ import '../parking_map_page.dart' show ParkingService;
 import '../parking_map_view.dart';
 import 'agent_fines.dart';
 import 'agent_models.dart';
+import 'agent_reports.dart';
 
 // ───────────────────────── Erreurs ─────────────────────────
 
@@ -326,6 +327,53 @@ class AgentService {
     ];
   }
 
+  /// GET /agent/reports : les signalements (à traiter d'abord).
+  static Future<List<Report>> fetchReports() async {
+    final res = await _send(() => http.get(Uri.parse('$_base/agent/reports')));
+    final body = _json(res, 'Signalements indisponibles');
+    return [
+      for (final r in (body['data'] as List? ?? const []))
+        Report.fromJson(r as Map<String, dynamic>),
+    ];
+  }
+
+  /// GET /agent/vehicles/{plaque} : propriétaire connu ou non.
+  static Future<VehicleInfo> lookupVehicle(String plate) async {
+    final res =
+        await _send(() => http.get(Uri.parse('$_base/agent/vehicles/$plate')));
+    return VehicleInfo.fromJson(
+        _json(res, 'Recherche impossible')['data'] as Map<String, dynamic>);
+  }
+
+  /// Valide un signalement : la place est assignée au véhicule depuis
+  /// l'heure du signalement, sans paiement.
+  static Future<void> validateReport(int id, {String? plate}) async {
+    final res = await _send(() => http.post(
+          Uri.parse('$_base/agent/reports/$id/validate'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'plate': plate}),
+        ));
+    _json(res, 'Validation refusée');
+  }
+
+  static Future<void> dismissReport(int id) async {
+    final res = await _send(
+        () => http.post(Uri.parse('$_base/agent/reports/$id/dismiss')));
+    _json(res, 'Rejet refusé');
+  }
+
+  /// Assigne directement une place libre à un véhicule (à partir de maintenant).
+  static Future<void> assignSlot(String slotId, String plate) async {
+    final id = int.tryParse(slotId);
+    if (id == null) throw AgentApiException('Place invalide ($slotId)');
+    final res = await _send(() => http.post(
+          Uri.parse('$_base/agent/slots/$id/assign'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'plate': plate}),
+        ));
+    _json(res, 'Assignation refusée');
+  }
+
   /// POST /agent/fines : dresse une contravention (l'agent, le montant, le
   /// lieu… sont complétés par le serveur).
   static Future<Fine> createFine({
@@ -362,6 +410,7 @@ class AgentController extends ChangeNotifier {
   AgentSnapshot? snapshot;
   List<Offense> offenses = [];
   List<Fine> fines = []; // les plus récentes d'abord
+  List<Report> reports = []; // signalements (à traiter d'abord)
   final List<double> occupancyHistory = [];
 
   bool loading = true;
@@ -374,6 +423,30 @@ class AgentController extends ChangeNotifier {
   bool _busy = false;
   bool _disposed = false;
 
+  // Signalements arrivés depuis le dernier chargement (pour avertir l'agent)
+  final Set<int> _knownReports = {};
+  final List<Report> _newReports = [];
+  bool _firstLoadDone = false;
+
+  List<Report> get pendingReports =>
+      reports.where((r) => r.isPending).toList();
+
+  /// Les signalements apparus depuis la dernière fois (et on les vide).
+  List<Report> takeNewReports() {
+    final list = List<Report>.from(_newReports);
+    _newReports.clear();
+    return list;
+  }
+
+  /// Rafraîchit juste après une action de l'agent.
+  Future<void> _refreshAfterAction() async {
+    var waited = 0;
+    while (_busy && waited++ < 50) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await refresh();
+  }
+
   void start() {
     refresh();
     _timer = Timer.periodic(const Duration(seconds: 8), (_) => refresh());
@@ -385,10 +458,18 @@ class AgentController extends ChangeNotifier {
     try {
       final s = await AgentService.load();
       final f = await AgentService.fetchFines();
+      final rep = await AgentService.fetchReports();
       if (offenses.isEmpty) offenses = await AgentService.fetchOffenses();
       if (_disposed) return;
       snapshot = s;
       fines = f;
+      for (final r in rep) {
+        if (_knownReports.add(r.id) && _firstLoadDone && r.isPending) {
+          _newReports.add(r);
+        }
+      }
+      _firstLoadDone = true;
+      reports = rep;
       error = null;
       occupancyHistory.add(s.stats.occupancyRate);
       if (occupancyHistory.length > 30) occupancyHistory.removeAt(0);
@@ -430,6 +511,23 @@ class AgentController extends ChangeNotifier {
     fines = [fine, ...fines];
     if (!_disposed) notifyListeners();
     return fine;
+  }
+
+  // ───── Signalements et assignations ─────
+
+  Future<void> validateReport(Report r, {String? plate}) async {
+    await AgentService.validateReport(r.id, plate: plate);
+    await _refreshAfterAction();
+  }
+
+  Future<void> dismissReport(Report r) async {
+    await AgentService.dismissReport(r.id);
+    await _refreshAfterAction();
+  }
+
+  Future<void> assignSlot(SlotInfo slot, String plate) async {
+    await AgentService.assignSlot(slot.id, plate);
+    await _refreshAfterAction();
   }
 
   @override

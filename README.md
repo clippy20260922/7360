@@ -178,8 +178,19 @@ Quatre onglets, même style que l'espace agent, tous alimentés par le serveur (
 | Amendes | Contraventions reçues sur ses véhicules, paiement (simulé) | `GET /me/fines`, `POST /me/fines/{n}/pay` |
 | Profil | Nom, prénom, plaque, type de véhicule, électrique, carte mobilité inclusion, notifications | `GET` / `PUT /me/profile` |
 
+Sur la carte, une place libre ou réservée a aussi un bouton **« Signaler comme prise »** (voir plus bas), et les signalements envoyés avec la réponse de l'agent sont listés en haut de l'onglet Réservations (`POST` / `GET /me/reports`).
+
 Réserver : la feuille de réservation est préremplie avec le profil, on choisit le début (maintenant, dans 30 min, 1 h, 2 h ou une heure précise) et la durée, le montant (`tarif × durée`) est affiché avant de valider. Pour un parking, le serveur choisit une place libre de la catégorie demandée. Une place PMR demande la carte mobilité inclusion dans le profil, une place avec borne un véhicule électrique.
 
 Cycle d'une réservation : *réservée* → (« Je suis arrivé(e) ») *garé* : la place devient occupée et payée jusqu'à la fin de la réservation, ce que voit l'agent → (« Reprendre la route ») *terminée*. Si l'usager dépasse l'heure de fin, le véhicule apparaît en infraction chez l'agent.
 
 Les rappels (début de réservation, fin de stationnement, nouvelle contravention) s'affichent dans l'application, selon les réglages du profil.
+
+## Signalements et assignation de places
+
+1. **L'usager signale** une place qui semble libre mais où un véhicule est garé (bouton « Signaler comme prise » sur la carte). La plaque est facultative ; l'heure du signalement est enregistrée par le serveur.
+2. **L'agent est prévenu** : un badge sur la cloche en haut de son écran, et un message avec un bouton « Voir ». La page *Signalements* montre la place, l'heure, le signalant et la plaque. Si la plaque est enregistrée, le propriétaire s'affiche ; sinon l'agent saisit une plaque et la recherche (`🔍`) pour retrouver la personne.
+3. **Valider** : la place est assignée au véhicule **depuis l'heure du signalement**, sans paiement : elle devient occupée et le véhicule apparaît en infraction (« sans paiement depuis 14:05 »), et l'agent peut dresser la contravention (le commentaire est prérempli). **Rejeter** laisse la place libre. L'usager voit la réponse dans son onglet Réservations.
+4. **Assigner directement** : sur la carte, la fiche d'une place libre a un bouton « Assigner à un véhicule » (plaque + recherche du propriétaire). La place est assignée à partir de maintenant, sans paiement.
+
+Une plaque inconnue est acceptée : le véhicule est enregistré sans propriétaire (`proprietaire = 'inconnu'`). Un véhicule déjà garé ailleurs ne peut pas être assigné.

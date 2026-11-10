@@ -333,3 +333,58 @@ class Profile {
 
   bool sameAs(Profile o) => toJson().toString() == o.toJson().toString();
 }
+
+// ───────────────────────── Signalements ─────────────────────────
+
+enum MyReportStatus { pending, validated, dismissed }
+
+extension MyReportStatusX on MyReportStatus {
+  String get label => switch (this) {
+        MyReportStatus.pending => 'En attente de vérification',
+        MyReportStatus.validated => 'Confirmé par un agent',
+        MyReportStatus.dismissed => 'Non retenu',
+      };
+
+  Color get color => switch (this) {
+        MyReportStatus.pending => AgentColors.warn,
+        MyReportStatus.validated => AgentColors.ok,
+        MyReportStatus.dismissed => AgentColors.muted,
+      };
+
+  IconData get icon => switch (this) {
+        MyReportStatus.pending => Icons.hourglass_top_rounded,
+        MyReportStatus.validated => Icons.task_alt_rounded,
+        MyReportStatus.dismissed => Icons.cancel_outlined,
+      };
+}
+
+/// Une place que l'usager a signalée comme prise (`GET /me/reports`).
+class MyReport {
+  const MyReport({
+    required this.id,
+    required this.slotId,
+    required this.location,
+    required this.reportedAt,
+    required this.status,
+    this.plate,
+  });
+
+  factory MyReport.fromJson(Map<String, dynamic> j) => MyReport(
+        id: (j['id'] as num).toInt(),
+        slotId: j['slot_id'].toString(),
+        location: j['location'] as String? ?? '',
+        reportedAt: _time(j['reported_at']),
+        status: switch (j['status']) {
+          'validated' => MyReportStatus.validated,
+          'dismissed' => MyReportStatus.dismissed,
+          _ => MyReportStatus.pending,
+        },
+        plate: j['plate'] as String?,
+      );
+
+  final int id;
+  final String slotId, location;
+  final DateTime reportedAt; // UTC : l'heure du signalement
+  final MyReportStatus status;
+  final String? plate;
+}

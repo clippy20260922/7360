@@ -90,6 +90,7 @@ class SlotInfo {
     this.plate,
     this.owner,
     this.endsAt,
+    this.since,
   });
 
   factory SlotInfo.fromJson(Map<String, dynamic> j) => SlotInfo(
@@ -106,6 +107,7 @@ class SlotInfo {
         plate: j['plate'] as String?,
         owner: j['owner'] as String?,
         endsAt: parseServerTime(j['fin_occupation'] as String?),
+        since: parseServerTime(j['since'] as String?, keepOldDates: true),
       );
 
   final String id;
@@ -120,6 +122,9 @@ class SlotInfo {
 
   /// Fin du stationnement payé, en UTC (null = aucun paiement).
   final DateTime? endsAt;
+
+  /// Depuis quand la place est occupée, en UTC (quand le serveur le sait).
+  final DateTime? since;
 
   /// Catégorie de place : standard, pmr, elec ou moto.
   String get category =>
@@ -157,7 +162,10 @@ class SlotInfo {
           'Expire dans ${formatDuration(endsAt!.difference(now))}',
         Compliance.overtime =>
           'Dépassement de ${formatDuration(now.difference(endsAt!))}',
-        Compliance.unpaid => 'Aucun paiement enregistré',
+        Compliance.unpaid => since == null
+            ? 'Aucun paiement enregistré'
+            : 'Sans paiement depuis ${formatDateTime(since!)} '
+                '(${formatDuration(now.difference(since!))})',
         Compliance.none => reserved ? 'Place réservée' : 'Place libre',
       };
 }

@@ -182,6 +182,22 @@ class UserService {
   static Future<void> leave(String plate) =>
       _post('/me/vehicles/$plate/leave', 'Départ refusé');
 
+  static Future<List<MyReport>> fetchReports() async =>
+      _list(await _get('/me/reports', 'Signalements indisponibles'),
+          MyReport.fromJson);
+
+  /// Signale une place comme prise (la plaque est facultative ; l'heure est
+  /// enregistrée par le serveur).
+  static Future<MyReport> reportSlot(int slotId,
+      {String? plate, String? comment}) async {
+    final body = await _post('/me/reports', 'Signalement refusé', body: {
+      'slot_id': slotId,
+      'plate': plate,
+      'comment': comment,
+    });
+    return MyReport.fromJson(body['data'] as Map<String, dynamic>);
+  }
+
   static Future<void> payFine(int no) =>
       _post('/me/fines/$no/pay', 'Paiement refusé');
 }
@@ -195,6 +211,7 @@ class UserController extends ChangeNotifier {
 
   UserSnapshot? snapshot;
   List<Fine> fines = [];
+  List<MyReport> reports = [];
   Profile? profile;
 
   bool loading = true;
@@ -222,12 +239,14 @@ class UserController extends ChangeNotifier {
     try {
       final s = await UserService.load();
       final f = await UserService.fetchFines();
+      final rep = await UserService.fetchReports();
       final p = profile ?? await UserService.fetchProfile();
       if (_disposed) return;
-      _collectNotices(s, f, p);
+      _collectNotices(s, f, p, rep);
       _firstLoadDone = true;
       snapshot = s;
       fines = f;
+      reports = rep;
       profile = p;
       error = null;
     } catch (e) {
@@ -256,8 +275,20 @@ class UserController extends ChangeNotifier {
     return list;
   }
 
-  void _collectNotices(UserSnapshot s, List<Fine> f, Profile p) {
+  void _collectNotices(
+      UserSnapshot s, List<Fine> f, Profile p, List<MyReport> rep) {
     final now = s.fetchedAt;
+
+    // Réponse d'un agent à l'un de mes signalements
+    for (final r in rep) {
+      if (r.status == MyReportStatus.pending) continue;
+      final key = 'report-${r.id}-${r.status.name}';
+      if (_announced.add(key) && _firstLoadDone) {
+        _notices.add(r.status == MyReportStatus.validated
+            ? 'Votre signalement (place ${r.slotId}) a été confirmé par un agent.'
+            : "Votre signalement (place ${r.slotId}) n'a pas été retenu.");
+      }
+    }
 
     for (final fine in f) {
       final isNew = _announced.add('fine-${fine.id}');
@@ -338,6 +369,23 @@ class UserController extends ChangeNotifier {
   Future<void> leave(ParkedVehicle v) async {
     await UserService.leave(v.plate);
     await _refreshAfterAction();
+  }
+
+  /// Signale une place comme prise ; renvoie le signalement enregistré.
+  Future<MyReport> reportSlot(UserSlot slot,
+      {String? plate, String? comment}) async {
+    final r = await UserService.reportSlot(int.parse(slot.id),
+        plate: plate, comment: comment);
+    await _refreshAfterAction();
+    return r;
+  }
+
+  /// Signalement en attente sur cette place (s'il y en a un).
+  MyReport? pendingReportFor(String slotId) {
+    for (final r in reports) {
+      if (r.slotId == slotId && r.status == MyReportStatus.pending) return r;
+    }
+    return null;
   }
 
   Future<void> payFine(Fine fine) async {

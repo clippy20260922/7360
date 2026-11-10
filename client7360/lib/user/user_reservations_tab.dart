@@ -100,6 +100,16 @@ class _UserReservationsTabState extends State<UserReservationsTab> {
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
             children: [
               _Summary(live: live.length, total: snap.reservations.length),
+              if (c.reports.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const SectionLabel('Mes signalements'),
+                const SizedBox(height: 8),
+                for (final r in c.reports.take(5))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _ReportRow(report: r),
+                  ),
+              ],
               if (loose.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 const SectionLabel('Véhicules garés'),
@@ -536,6 +546,54 @@ class _ParkedCard extends StatelessWidget {
               icon: const Icon(Icons.directions_car_rounded),
               label: const Text('Reprendre la route',
                   style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Un signalement de place prise envoyé par l'usager, avec la réponse de l'agent.
+class _ReportRow extends StatelessWidget {
+  const _ReportRow({required this.report});
+
+  final MyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = report;
+    final color = r.status.color;
+    return AgentCard(
+      accent: color,
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          Icon(r.status.icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Place ${r.slotId} · ${r.location}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AgentColors.ink,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                  ),
+                ),
+                Text(
+                  '${r.status.label} · signalée ${formatDateTime(r.reportedAt)}',
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

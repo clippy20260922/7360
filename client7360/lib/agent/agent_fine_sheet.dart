@@ -99,7 +99,14 @@ class _FineSheetState extends State<_FineSheet> {
   late Offense? _offense = defaultOffenseFor(
       widget.controller.offenses, widget.info.complianceAt(_now));
   final _plate = TextEditingController();
-  final _comment = TextEditingController();
+  // Place occupée sans paiement depuis une heure connue : on le note d'office
+  late final TextEditingController _comment = TextEditingController(
+    text: (widget.info.since != null &&
+            widget.info.complianceAt(_now) == Compliance.unpaid)
+        ? 'Stationnement sans paiement constaté depuis '
+            '${formatDateTime(widget.info.since!)}.'
+        : '',
+  );
   String? _error; // erreur sur la plaque
   String? _submitError; // refus du serveur / réseau
   bool _busy = false;

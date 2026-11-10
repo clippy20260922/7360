@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../parking_map_view.dart';
+import 'agent_assign_sheet.dart';
 import 'agent_fine_sheet.dart';
 import 'agent_models.dart';
 import 'agent_service.dart';
@@ -499,6 +500,17 @@ class _SpotPanel extends StatelessWidget {
         const SizedBox(height: 12),
         FineButton(controller: controller, info: i),
       ],
+      if (i != null && !i.occupied) ...[
+        for (final r in controller.pendingReports)
+          if (r.slotId == i.id) ...[
+            const SizedBox(height: 12),
+            Tag(Icons.flag_rounded,
+                'Signalée comme prise à ${formatDateTime(r.reportedAt)}',
+                color: AgentColors.warn),
+          ],
+        const SizedBox(height: 12),
+        _AssignButton(controller: controller, info: i),
+      ],
       if (i != null) ...[
         const SizedBox(height: 16),
         const SectionLabel('Place'),
@@ -712,6 +724,38 @@ class _LotVehicleRow extends StatelessWidget {
             FineButton(controller: controller, info: info),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Bouton « Assigner à un véhicule » (place libre ou réservée sans véhicule).
+class _AssignButton extends StatelessWidget {
+  const _AssignButton({required this.controller, required this.info});
+
+  final AgentController controller;
+  final SlotInfo info;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AgentColors.blue,
+          side: const BorderSide(color: AgentColors.blue),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: () =>
+            showAssignSheet(context, controller: controller, info: info),
+        icon: const Icon(Icons.assignment_ind_rounded),
+        label: const Text(
+          'Assigner à un véhicule',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+        ),
       ),
     );
   }

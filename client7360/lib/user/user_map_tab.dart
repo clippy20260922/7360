@@ -6,6 +6,7 @@ import '../agent/agent_models.dart';
 import '../agent/agent_theme.dart';
 import '../agent/agent_widgets.dart';
 import '../parking_map_view.dart';
+import 'report_sheet.dart';
 import 'reserve_sheet.dart';
 import 'user_models.dart';
 import 'user_service.dart';
@@ -312,9 +313,50 @@ class _SlotPanel extends StatelessWidget {
                   ),
                 ),
               ],
+              if (status != SpotStatus.occupied) ...[
+                const SizedBox(height: 10),
+                if (controller.pendingReportFor(s.id) != null)
+                  const Tag(Icons.flag_rounded,
+                      'Signalement envoyé : un agent va vérifier',
+                      color: AgentColors.warn)
+                else
+                  _ReportButton(controller: controller, slot: s),
+              ],
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// « Signaler comme prise » : la place semble libre mais un véhicule s'y trouve.
+class _ReportButton extends StatelessWidget {
+  const _ReportButton({required this.controller, required this.slot});
+
+  final UserController controller;
+  final UserSlot slot;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 46,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF8A5B00),
+          side: const BorderSide(color: AgentColors.warn),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: const Icon(Icons.flag_rounded),
+        label: const Text(
+          'Signaler comme prise',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        onPressed: () =>
+            showReportSheet(context, controller: controller, slot: slot),
       ),
     );
   }

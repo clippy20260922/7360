@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'agent_fines_tab.dart';
 import '../page_connexion.dart';
 import 'agent_map_tab.dart';
+import 'agent_reports_page.dart';
 import 'agent_service.dart';
 import 'agent_stats_tab.dart';
 import 'agent_theme.dart';
@@ -34,13 +35,54 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_announceNewReports);
     _controller.start();
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_announceNewReports);
     _controller.dispose();
     super.dispose();
+  }
+
+  void _openReports() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AgentReportsPage(controller: _controller),
+      ),
+    );
+  }
+
+  /// Avertit l'agent quand un usager signale une place (en plus du badge
+  /// sur la cloche).
+  void _announceNewReports() {
+    final fresh = _controller.takeNewReports();
+    if (fresh.isEmpty || !mounted) return;
+    final text = fresh.length == 1
+        ? 'Nouveau signalement : place ${fresh.first.slotId} signalée comme prise.'
+        : '${fresh.length} nouveaux signalements de places prises.';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AgentColors.navy,
+          duration: const Duration(seconds: 8),
+          content: Row(
+            children: [
+              const Icon(Icons.flag_rounded, color: AgentColors.warn),
+              const SizedBox(width: 12),
+              Expanded(child: Text(text)),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Voir',
+            textColor: AgentColors.cyan,
+            onPressed: _openReports,
+          ),
+        ),
+      );
   }
 
   void _logout() {
@@ -109,6 +151,21 @@ class _AgentShellState extends State<AgentShell> {
             ],
           ),
           actions: [
+            ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) {
+                final n = _controller.pendingReports.length;
+                return IconButton(
+                  tooltip: 'Signalements',
+                  onPressed: _openReports,
+                  icon: Badge(
+                    isLabelVisible: n > 0,
+                    label: Text('$n'),
+                    child: const Icon(Icons.notifications_rounded),
+                  ),
+                );
+              },
+            ),
             IconButton(
               tooltip: 'Se déconnecter',
               icon: const Icon(Icons.logout_rounded),
