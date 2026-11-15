@@ -6,7 +6,6 @@ steps:
     commands:
       - cd client7360
       - flutter --version
-      - id
-      # - flutter pub get
-      # - flutter build apk --target-platform android-arm64
-      # - cp build/app/outputs/flutter-apk/app-release.apk /volume1/app-release-${CI_PIPELINE_NUMBER}.apk
+      - flutter pub get
+      - flutter build apk --target-platform android-arm64
+      - cp build/app/outputs/flutter-apk/app-release.apk /volume1/app-release-${CI_PIPELINE_NUMBER}.apk
